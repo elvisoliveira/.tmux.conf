@@ -2,6 +2,6 @@
 My tmux setup.
 
 ```
-ln -s (pwd)/.vimrc ~/.vimrc
-ln -s /python2.7/site-packages ~/.vim/
+ln -s (pwd)/.tmux.conf ~/.tmux.conf
+
 ```
