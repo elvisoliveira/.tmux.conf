@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# Print current keyboard layout for tmux status bar.
+# Wayland (sway) -> X11 (setxkbmap) -> TTY state file -> vconsole default.
+
+set -uo pipefail
+
+if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
+  swaymsg -t get_inputs -r 2>/dev/null \
+    | jq -r '.[] | select(.type=="keyboard") | .xkb_active_layout_name' \
+    | head -n 1 | tr '[:lower:]' '[:upper:]'
+  exit 0
+fi
+
+if [ -n "${DISPLAY:-}" ] && command -v setxkbmap >/dev/null 2>&1; then
+  setxkbmap -query 2>/dev/null | awk '/layout:/ { print toupper($2); exit }'
+  exit 0
+fi
+
+state_file="${XDG_RUNTIME_DIR:-/tmp}/tty-kbd-layout"
+if [ -r "$state_file" ]; then
+  tr '[:lower:]' '[:upper:]' < "$state_file"
+else
+  localectl status 2>/dev/null | awk '/VC Keymap:/ { print toupper($3); exit }'
+fi

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# Cycle Linux console keymap through a list of layouts.
+# Only effective on a real TTY (client_tty=/dev/ttyN); loadkeys is a no-op
+# under X/Wayland terminals. Requires a NOPASSWD sudoers rule covering each
+# layout in `layouts` below.
+
+set -euo pipefail
+
+layouts=(us br-abnt2)
+declare -A loadkeys_arg=(
+  [us]="us"
+  [br-abnt2]="$HOME/.env/.tmux.conf/bin/br-abnt2-custom.map"
+)
+
+client_tty="$(tmux display-message -p '#{client_tty}')"
+if [[ ! "$client_tty" =~ ^/dev/tty[0-9]+$ ]]; then
+  exit 0
+fi
+
+state_file="${XDG_RUNTIME_DIR:-/tmp}/tty-kbd-layout"
+current="$(cat "$state_file" 2>/dev/null || echo "${layouts[0]}")"
+
+next_index=0
+for i in "${!layouts[@]}"; do
+  if [ "${layouts[$i]}" = "$current" ]; then
+    next_index=$(( (i + 1) % ${#layouts[@]} ))
+    break
+  fi
+done
+next="${layouts[$next_index]}"
+
+if sudo -n /usr/bin/loadkeys "${loadkeys_arg[$next]}" 2>/dev/null; then
+  printf '%s\n' "$next" > "$state_file"
+  tmux refresh-client -S
+fi

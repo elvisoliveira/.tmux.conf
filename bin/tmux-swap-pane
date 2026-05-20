@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+direction="${1:-}"
+
+case "$direction" in
+  left)
+    edge_format='#{pane_at_left}'
+    target='{left-of}'
+    message='No pane to the left'
+    edge_action='previous-window'
+    ;;
+  down)
+    edge_format='#{pane_at_bottom}'
+    target='{down-of}'
+    message='No pane below'
+    edge_action=''
+    ;;
+  up)
+    edge_format='#{pane_at_top}'
+    target='{up-of}'
+    message='No pane above'
+    edge_action=''
+    ;;
+  right)
+    edge_format='#{pane_at_right}'
+    target='{right-of}'
+    message='No pane to the right'
+    edge_action='next-window'
+    ;;
+  *)
+    tmux display-message 'Invalid swap direction'
+    exit 1
+    ;;
+esac
+
+if [ "$(tmux display-message -p "$edge_format")" = "1" ]; then
+  if [ -n "$edge_action" ]; then
+    tmux "$edge_action"
+    exit 0
+  fi
+
+  tmux display-message "$message"
+  exit 0
+fi
+
+current_pane="$(tmux display-message -p '#{pane_id}')"
+
+tmux swap-pane -s "$current_pane" -t "$target"
+tmux select-pane -t "$current_pane"
