@@ -1,0 +1,4 @@
+include "/usr/share/kbd/keymaps/i386/qwerty/br-abnt2.map.gz"
+
+# AC10 (tecla ç): Shift -> ?  (preserva Ç via Capslock)
+keycode 39 = +ccedilla question
