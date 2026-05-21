@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# Print battery percent (e.g. "64%") for the laptop battery.
+# Silent when there is no battery (desktops, WSL, VMs).
+
+set -uo pipefail
+
+# Linux: sysfs
+for d in /sys/class/power_supply/BAT*; do
+  if [ -r "$d/capacity" ]; then
+    printf '%s%%\n' "$(cat "$d/capacity")"
+    exit 0
+  fi
+done
+
+# macOS: pmset
+if command -v pmset >/dev/null 2>&1; then
+  pct="$(pmset -g batt 2>/dev/null | awk 'match($0, /[0-9]+%/) { print substr($0, RSTART, RLENGTH); exit }')"
+  if [ -n "$pct" ]; then
+    printf '%s\n' "$pct"
+    exit 0
+  fi
+fi
+
+exit 0

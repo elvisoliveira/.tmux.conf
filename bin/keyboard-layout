@@ -10,9 +10,14 @@ set -uo pipefail
 sway_pid="$(pgrep -x sway 2>/dev/null | head -n 1)"
 if [ -n "$sway_pid" ]; then
   export SWAYSOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/sway-ipc.$(id -u).${sway_pid}.sock"
+  # Sway exposes long names like "English (US)" / "Portuguese (Brazil)".
+  # Extract the country (parenthesized) and truncate to 2 chars: US, BR, UK.
   swaymsg -t get_inputs -r 2>/dev/null \
     | jq -r '.[] | select(.type=="keyboard") | .xkb_active_layout_name' \
-    | head -n 1 | tr '[:lower:]' '[:upper:]'
+    | head -n 1 \
+    | sed -E 's/.*\(([^)]+)\).*/\1/' \
+    | cut -c1-2 \
+    | tr '[:lower:]' '[:upper:]'
   exit 0
 fi
 

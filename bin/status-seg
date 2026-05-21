@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+# Emit a status-bar segment as " | LABEL VAL" when the underlying command
+# produces output, otherwise emit nothing. Lets the status bar auto-collapse
+# segments that aren't available on the current platform.
+#
+# Usage: status-seg LABEL COMMAND [ARGS...]
+
+set -uo pipefail
+
+label="${1:-}"
+shift || exit 0
+
+val="$("$@" 2>/dev/null)"
+[ -n "$val" ] && printf ' | %s %s' "$label" "$val"
