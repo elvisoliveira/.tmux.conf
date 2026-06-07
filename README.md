@@ -31,3 +31,28 @@ sudo usermod -aG video "$USER"   # if not already in the video group
 
 `~/permitir-backlight.sh` automates exactly this. The group change only
 applies to new sessions.
+
+## TTY font size (`font-size`)
+
+`bin/font-size up|down` cycles terminus-font sizes on the raw TTY
+(`Alt+=` / `Alt+-`). It's a silent no-op on a graphical terminal — it keys off
+the real terminal name, which tmux passes in via `TMUX_TERM` since `run-shell`
+does not inherit the pane's `TERM`. State persists in `~/.cache/tty-font-size`.
+
+It needs `terminus-font` plus a narrowly-scoped passwordless `setfont`:
+
+```sh
+sudo xbps-install -y terminus-font
+
+# NOPASSWD only for `setfont -C /dev/tty[1-6] ter-v...`, nothing broader.
+# The filename starts with `zz-` on purpose: sudoers applies the LAST matching
+# rule, so this drop-in must sort after `wheel` or a blanket wheel rule would
+# override the NOPASSWD.
+echo "$(id -un) ALL=(root) NOPASSWD: /usr/bin/setfont -C /dev/tty[1-6] ter-v[0-9]*" \
+  | sudo tee /etc/sudoers.d/zz-setfont-nopasswd
+sudo chmod 0440 /etc/sudoers.d/zz-setfont-nopasswd
+sudo visudo -c -f /etc/sudoers.d/zz-setfont-nopasswd   # validate syntax
+```
+
+`~/permitir-setfont.sh` automates exactly this. `bin/font-size` invokes
+`sudo -n setfont -C /dev/ttyN ter-vNNn`, which matches the rule above.

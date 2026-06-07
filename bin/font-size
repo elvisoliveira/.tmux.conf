@@ -1,0 +1,68 @@
+#!/bin/sh
+# Cycle through terminus-font sizes on the raw TTY.
+# Usage: font-size up | down
+#
+# State persisted in ~/.cache/tty-font-size.
+# Prerequisites: terminus-font installed + sudoers NOPASSWD for setfont
+# (run ~/permitir-setfont.sh once).
+
+set -u
+
+SIZES="12 14 16 18 20 22 24 28 32"
+STATE="$HOME/.cache/tty-font-size"
+TERMNAME="${TMUX_TERM:-$TERM}"
+direction="${1:-up}"
+
+# Only meaningful on the raw TTY. On a graphical terminal, silent no-op.
+if [ "$TERMNAME" != "linux" ]; then
+    [ -n "${TMUX:-}" ] && tmux display-message "font-size: not on the raw TTY"
+    exit 0
+fi
+
+mkdir -p "$(dirname "$STATE")"
+current=$(cat "$STATE" 2>/dev/null || echo 22)
+
+next="$current"
+case "$direction" in
+    up)
+        for s in $SIZES; do
+            if [ "$s" -gt "$current" ]; then next=$s; break; fi
+        done
+        ;;
+    down)
+        prev=""
+        for s in $SIZES; do
+            if [ "$s" -ge "$current" ]; then
+                [ -n "$prev" ] && next="$prev"
+                break
+            fi
+            prev="$s"
+        done
+        ;;
+    *)
+        [ -n "${TMUX:-}" ] && tmux display-message "font-size: use 'up' or 'down'"
+        exit 1
+        ;;
+esac
+
+if [ "$next" = "$current" ]; then
+    [ -n "${TMUX:-}" ] && tmux display-message "Font: ter-v${current}n (limit)"
+    exit 0
+fi
+
+# Get the tmux client's TTY (more reliable than fgconsole under run-shell).
+# Fallback: try fgconsole; if that fails, assume tty1.
+if [ -n "${TMUX_TTY:-}" ]; then
+    case "$TMUX_TTY" in
+        /dev/tty[1-6]) vt="${TMUX_TTY#/dev/tty}" ;;
+        *) vt=1 ;;
+    esac
+else
+    vt=$(fgconsole 2>/dev/null || echo 1)
+fi
+if sudo -n setfont -C "/dev/tty$vt" "ter-v${next}n" 2>/dev/null; then
+    echo "$next" > "$STATE"
+    [ -n "${TMUX:-}" ] && tmux display-message "Font: ter-v${next}n"
+else
+    [ -n "${TMUX:-}" ] && tmux display-message "Failed: ter-v${next}n (run ~/permitir-setfont.sh)"
+fi
