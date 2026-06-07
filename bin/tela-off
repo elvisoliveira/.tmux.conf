@@ -1,0 +1,23 @@
+#!/bin/sh
+# Turn off the screen backlight until a key is pressed.
+# Hardware-level: does not touch the framebuffer, WiFi, processes, nothing.
+# Claude Code, downloads, syncs etc keep running normally in the background.
+#
+# Prerequisite: the user needs write permission on
+# /sys/class/backlight/intel_backlight/brightness — granted via a udev rule
+# that ~/permitir-backlight.sh applies (video group + 0664).
+
+BL=/sys/class/backlight/intel_backlight
+BRIGHTNESS=$BL/brightness
+ORIG=$(cat "$BRIGHTNESS")
+
+restore() {
+    echo "$ORIG" > "$BRIGHTNESS" 2>/dev/null
+    stty echo icanon 2>/dev/null
+}
+trap restore EXIT INT TERM
+
+stty -echo -icanon
+echo 0 > "$BRIGHTNESS"
+
+dd bs=1 count=1 2>/dev/null >/dev/null
