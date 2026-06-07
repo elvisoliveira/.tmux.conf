@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""
+touch-scroll-daemon: a vertical touchscreen drag -> PageUp/PageDown.
+
+Reads the touchscreen via evdev and injects PageUp/PageDown keys through a
+virtual keyboard (uinput). Meant for scrolling in contexts where PageUp/Down
+make sense (e.g. tmux copy-mode, less, vim) on a real TTY -- touch-scroll-ctl
+is what decides when to start/stop it based on context.
+
+Needs access to /dev/input/* (input group) and /dev/uinput (udev rule).
+"""
+
+import sys
+
+from evdev import InputDevice, UInput, ecodes, list_devices
+
+# --- configuration --------------------------------------------------------
+
+# Stable touchscreen path (independent of the eventX number across boots).
+DEVICE_PATH = "/dev/input/by-id/usb-ELAN_Touchscreen-event-if00"
+
+# Fraction of the vertical touch range that counts as "one page".
+# Smaller = more sensitive (more PageUp/Down per drag). 0.10 = ~10 taps
+# per full-screen drag.
+SCROLL_FRACTION = 0.10
+
+# Natural scrolling: dragging DOWN moves content up (PageUp / back in history),
+# dragging UP moves it down (PageDown). Set to False to invert.
+NATURAL = True
+
+# Minimum distance (as a fraction of the range) to count as movement, not a tap.
+TAP_DEADZONE = 0.02
+
+
+# --- daemon ---------------------------------------------------------------
+
+def find_device():
+    """Return the touchscreen InputDevice, trying the stable path first and
+    falling back to a search by name."""
+    try:
+        return InputDevice(DEVICE_PATH)
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    for path in list_devices():
+        try:
+            dev = InputDevice(path)
+        except OSError:
+            continue
+        caps = dev.capabilities()
+        has_abs = ecodes.EV_ABS in caps
+        has_touch = ecodes.EV_KEY in caps and ecodes.BTN_TOUCH in caps[ecodes.EV_KEY]
+        if dev.name == "ELAN Touchscreen" and has_abs and has_touch:
+            return dev
+    raise SystemExit("touchscreen not found (ELAN Touchscreen / "
+                     + DEVICE_PATH + ")")
+
+
+def abs_y_range(dev):
+    """(min, max) of the Y axis. Tries ABS_Y and falls back to ABS_MT_POSITION_Y."""
+    caps = dict(dev.capabilities().get(ecodes.EV_ABS, []))
+    info = caps.get(ecodes.ABS_Y) or caps.get(ecodes.ABS_MT_POSITION_Y)
+    if info is None:
+        raise SystemExit("device has no absolute Y axis")
+    return info.min, info.max
+
+
+def main():
+    dev = find_device()
+    y_min, y_max = abs_y_range(dev)
+    span = max(1, y_max - y_min)
+    threshold = span * SCROLL_FRACTION
+    deadzone = span * TAP_DEADZONE
+
+    up_key = ecodes.KEY_PAGEUP if NATURAL else ecodes.KEY_PAGEDOWN     # drag down
+    down_key = ecodes.KEY_PAGEDOWN if NATURAL else ecodes.KEY_PAGEUP   # drag up
+
+    ui = UInput({ecodes.EV_KEY: [ecodes.KEY_PAGEUP, ecodes.KEY_PAGEDOWN]},
+                name="touch-scroll-daemon")
+
+    print(f"[touch-scroll-daemon] device={dev.path} ({dev.name}) "
+          f"y=[{y_min},{y_max}] threshold={threshold:.0f}px", flush=True)
+
+    touching = False
+    cur_y = None       # last Y position read
+    anchor = None      # reference Y position of the last fire
+    moved = 0.0        # max displacement since the touch (for the deadzone)
+
+    def tap(key):
+        ui.write(ecodes.EV_KEY, key, 1)
+        ui.syn()
+        ui.write(ecodes.EV_KEY, key, 0)
+        ui.syn()
+
+    for ev in dev.read_loop():
+        if ev.type == ecodes.EV_KEY and ev.code == ecodes.BTN_TOUCH:
+            touching = ev.value == 1
+            if touching:
+                anchor = cur_y
+                moved = 0.0
+            else:
+                anchor = None
+            continue
+
+        if ev.type == ecodes.EV_ABS and ev.code in (ecodes.ABS_Y,
+                                                     ecodes.ABS_MT_POSITION_Y):
+            cur_y = ev.value
+            if not touching:
+                continue
+            if anchor is None:
+                anchor = cur_y
+                continue
+
+            delta = cur_y - anchor
+            moved = max(moved, abs(cur_y - anchor))
+            if moved < deadzone:
+                continue
+
+            # Fire one PageUp/Down per 'threshold' travelled, re-anchoring
+            # to allow continuous dragging.
+            while abs(delta) >= threshold:
+                if delta > 0:           # finger moved down (Y increases)
+                    tap(up_key)
+                    anchor += threshold
+                else:                   # finger moved up
+                    tap(down_key)
+                    anchor -= threshold
+                delta = cur_y - anchor
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except PermissionError:
+        sys.exit("permission denied: needs access to /dev/input and /dev/uinput "
+                 "(input group + uinput udev rule)")
