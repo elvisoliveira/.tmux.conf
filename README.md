@@ -5,6 +5,48 @@ My tmux setup.
 ln -s (pwd)/.tmux.conf ~/.tmux.conf
 ```
 
+## Touch scroll on the TTY
+
+On a raw TTY (kernel 5.10+ removed the fbcon scrollback, so `Shift+PgUp`
+does nothing), `bin/touch-scroll-daemon` reads the touchscreen via evdev and
+turns a vertical drag into `PageUp`/`PageDown`, injected through a virtual
+uinput keyboard. `bin/touch-scroll-ctl` (wired to the `client-attached` /
+`client-detached` hooks) only starts it while a tmux client is on a real VT
+(`/dev/ttyN`); under a graphical terminal (`/dev/pts/*`) the compositor already
+handles touch, so the daemon stays off to avoid double scrolling.
+
+It needs Python evdev plus read access to the touchscreen and write access to
+`/dev/uinput`. Granting that via group + udev means the daemon runs without
+root at runtime:
+
+```sh
+# dependency
+sudo xbps-install -y python3-evdev
+
+# udev rule: expose /dev/uinput to the `input` group
+echo 'KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
+  | sudo tee /etc/udev/rules.d/99-uinput.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger /dev/uinput
+
+# join the `input` group (reads the touchscreen, writes uinput)
+sudo usermod -aG input "$USER"
+```
+
+The group change only applies to new sessions, and the tmux server inherits
+the groups of whoever started it — so after `usermod`, run `tmux kill-server`
+and start a fresh session (or re-login).
+
+Verify and tune:
+
+```sh
+id | grep -o input              # must list `input` before the daemon can run
+pgrep -af touch-scroll-daemon   # empty = off; with a PID = running
+```
+
+Knobs live at the top of `bin/touch-scroll-daemon`: `SCROLL_FRACTION`
+(sensitivity), `NATURAL` (drag direction), `TAP_DEADZONE` (tap vs. drag).
+
 ## Backlight off (`tela-off`)
 
 `bin/tela-off` turns off the screen backlight until any key is pressed

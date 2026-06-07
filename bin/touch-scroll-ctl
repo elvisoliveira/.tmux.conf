@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+# Start/stop the touch-scroll-daemon depending on whether any tmux client is
+# on a real TTY (/dev/ttyN). On a graphical terminal (/dev/pts/*) the compositor
+# already handles touch -- and Ptyxis has native touch scrolling -- so the
+# daemon stays off to avoid double scrolling. Idempotent; called by tmux's
+# client-attached / client-detached hooks.
+
+set -eu
+
+DAEMON="$HOME/.env/.tmux.conf/bin/touch-scroll-daemon"
+TOUCH_DEV=/dev/input/by-id/usb-ELAN_Touchscreen-event-if00
+PATTERN='touch-scroll-daemon$'   # anchored: does not match this -ctl
+
+running() { pgrep -f "$PATTERN" >/dev/null 2>&1; }
+
+# Any tmux client on a real TTY (VT)? On a graphical terminal the tty is /dev/pts/N.
+on_real_tty() {
+  tmux list-clients -F '#{client_tty}' 2>/dev/null \
+    | grep -qE '^/dev/tty[0-9]+$'
+}
+
+if on_real_tty && [ -e "$TOUCH_DEV" ]; then
+  running || setsid -f "$DAEMON" >/dev/null 2>&1
+else
+  running && pkill -f "$PATTERN" || true
+fi
