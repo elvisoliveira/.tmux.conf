@@ -1,0 +1,129 @@
+#!/bin/sh
+# tmux-notify-popup — render ONE libnotify notification as an auto-closing toast
+# popup in tmux, colored by urgency. Reads a single tiramisu --json object on
+# stdin. Driven by tmux-notifyd; can also be tested by hand:
+#
+#   echo '{"source":"build","summary":"Done","body":"3 passed","hints":{"urgency":"0x02"}}' \
+#       | ~/.env/.tmux.conf/bin/tmux-notify-popup
+#
+# tmux options (set -g):
+#   @notify-popup-duration   seconds the toast stays up      (default 4)
+#
+# display-popup is modal per client (it grabs that client's input while open),
+# so keep the duration short. Each popup is backgrounded because the CLI call
+# blocks until the popup closes.
+
+set -u
+
+DUR=$(tmux show-option -gqv @notify-popup-duration 2>/dev/null)
+case "$DUR" in ''|*[!0-9]*) DUR=4 ;; esac
+
+RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+# Read the notification JSON from stdin, then parse it into safely-quoted shell
+# assignments. python gets its program via -c (NOT `python3 - <<HEREDOC`, which
+# would hijack stdin and starve json.load of the actual notification).
+json=$(cat)
+vars=$(printf '%s' "$json" | python3 -c '
+import json, sys, shlex
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+src  = (d.get("source")  or "").strip()
+summ = (d.get("summary") or "").strip()
+body = (d.get("body")    or "").strip()
+urg  = str((d.get("hints") or {}).get("urgency", "")).strip()
+if not (summ or body):
+    sys.exit(1)
+maxlen = max(len(summ), len(body), len(src) + 6)
+nlines = 1 + (1 if body else 0)
+out = {"SRC": src, "SUMM": summ, "BODY": body, "URG": urg,
+       "MAXLEN": str(maxlen), "NLINES": str(nlines)}
+for k, v in out.items():
+    print("%s=%s" % (k, shlex.quote(v)))
+') || exit 0
+eval "$vars"
+
+# Color by urgency (0x02 = critical -> red, otherwise normal -> blue).
+# bstyle:  popup border (fg+bg fill). pbstyle: floating-pane border (fg only).
+case "$URG" in
+    0x02|2) bstyle="fg=colour231,bg=colour160"; pbstyle="fg=colour160" ;;   # critical: red
+    *)      bstyle="fg=colour231,bg=colour24";  pbstyle="fg=colour39"  ;;   # normal: blue
+esac
+
+# Title (border) = the notification SUMMARY, i.e. the notify-send title — this
+# is what `notify-send "<title>" "<body>"` puts first. The app name is prefixed
+# only when it is set and not libnotify's generic "notify-send" default.
+case "$SRC" in
+    ''|notify-send) title=" 🔔 $SUMM " ;;
+    *)              title=" 🔔 $SRC · $SUMM " ;;
+esac
+
+# Body area = the body, written WITHOUT a trailing newline so a short pane does
+# not scroll it out of view. A single space keeps the pane valid when empty.
+tmpf="$RUNTIME/tmux-notify.$$"
+if [ -n "$BODY" ]; then printf '%s' "$BODY" > "$tmpf"; else printf ' ' > "$tmpf"; fi
+blines=$(awk 'END{print NR}' "$tmpf"); [ "${blines:-0}" -lt 1 ] && blines=1
+
+# Geometry, clamped. Width tracks the wider of title and body; +6 pads borders
+# and wide glyphs (🔔, ·). Height = body lines + 2: both a floating pane and a
+# popup reserve exactly two rows of chrome, so +2 leaves no trailing blank row.
+maxc=${#title}; [ "${#BODY}" -gt "$maxc" ] && maxc=${#BODY}
+w=$((maxc + 6)); [ "$w" -lt 24 ] && w=24; [ "$w" -gt 64 ] && w=64
+h=$((blines + 2))
+
+# Render on EVERY live tmux server that has an attached client — auto-discovered
+# by scanning the socket dir. A daemon has no $TMUX, so we can't assume the
+# default socket; the user may be on 'next', 'default', or any custom socket.
+# Capability is probed per socket (servers may differ in version), preferring a
+# FLOATING PANE (tmux >= 3.7, non-modal — never steals the keyboard) and falling
+# back to a modal popup on older servers.
+# --- toast renderers (use the geometry/style computed above) ----------------
+# Floating, non-modal, top-right, auto-closing. For new-pane, -x/-y are the SIZE
+# and -X/-Y the position (opposite of display-popup).
+_float() {  # $1=sock  $2=target-window  $3=window-width
+    _fx=$(( ${3:-80} - w - 1 )); [ "$_fx" -lt 0 ] && _fx=0
+    tmux -S "$1" new-pane -d -t "$2" -x "$w" -y "$h" -X "$_fx" -Y 1 \
+        -S "$pbstyle" -R "$pbstyle" -T "$title" "cat '$tmpf'; sleep $DUR" >/dev/null 2>&1
+}
+# Modal popup — crash-safe. -k: any key dismisses it, so it yields to your typing
+# after at most one swallowed keystroke.
+_popup() {  # $1=sock  $2=client
+    tmux -S "$1" display-popup -E -k -c "$2" -b rounded -S "$bstyle" -T "$title" \
+        -w "$w" -h "$h" -x R -y 1 "cat '$tmpf'; sleep $DUR" >/dev/null 2>&1 &
+}
+
+SOCKDIR="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)"
+TAB=$(printf '\t')
+for sock in "$SOCKDIR"/*; do
+    [ -S "$sock" ] || continue
+    # Live server with at least one attached client?
+    [ -n "$(tmux -S "$sock" list-clients 2>/dev/null)" ] || continue
+
+    # Does this server support floating panes, and are they allowed?
+    # `set -g @notify-force-popup on` forces the stable modal popup everywhere.
+    supports_float=no
+    force_popup=$(tmux -S "$sock" show-option -gqv @notify-force-popup 2>/dev/null)
+    [ "$force_popup" != "on" ] \
+        && tmux -S "$sock" list-commands new-pane 2>&1 | grep -q '^new-pane' \
+        && supports_float=yes
+    # Float whenever the server supports it — no zoom special-casing. The
+    # floating-pane-over-zoomed-window crash is fixed by the local spawn.c/
+    # window.c patch, so a zoomed window is safe: the toast floats over it, and
+    # closing the toast unzooms the window (re-zoom manually). @notify-force-popup
+    # (folded into supports_float above) still forces the modal popup.
+    tmux -S "$sock" list-clients \
+        -F "#{client_name}${TAB}#{session_name}:#{window_index}${TAB}#{window_width}" 2>/dev/null \
+    | while IFS="$TAB" read -r cname tgt ww; do
+        [ -n "$cname" ] || continue
+        if [ "$supports_float" = yes ]; then
+            _float "$sock" "$tgt" "$ww"
+        else
+            _popup "$sock" "$cname"
+        fi
+    done
+done
+
+# Remove the temp file once the longest-lived popup has closed.
+( sleep $((DUR + 1)); rm -f "$tmpf" ) >/dev/null 2>&1 &

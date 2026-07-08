@@ -1,0 +1,23 @@
+#!/bin/sh
+# Fire sample notifications straight through the toast presenter, targeting the
+# CURRENT tmux server (inherited via $TMUX). This exercises the *rendering* — the
+# only part that differs by tmux version:
+#   * run inside your normal session      -> modal popup (tmux 3.6 fallback)
+#   * run inside `tmux -L next` (3.8)      -> non-modal FLOATING toast
+#
+# The notify-send -> D-Bus -> tiramisu path is version-independent and already
+# verified, so testing the presenter is enough to validate the new tmux.
+#
+# Usage: notify-selftest
+set -u
+P="$(dirname "$0")/tmux-notify-popup"
+
+fire() { printf '%s\n' "$1" | "$P"; }
+
+echo "Disparando 3 toasts no servidor tmux atual (${TMUX:-fora do tmux})..."
+fire '{"source":"CI","summary":"Build quebrou","body":"3 testes falharam no modulo auth","hints":{"urgency":"0x02"}}'
+sleep 5
+fire '{"source":"claude","summary":"Tarefa finalizada","body":"pronto pra revisao","hints":{"urgency":"0x01"}}'
+sleep 5
+fire '{"source":"backup","summary":"Snapshot concluido"}'
+echo "feito."
