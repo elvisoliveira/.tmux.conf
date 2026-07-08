@@ -1,0 +1,46 @@
+#!/bin/sh
+# tmux-notifyd — bridge libnotify (D-Bus) notifications into tmux.
+#
+# Ensures a user session bus exists at a fixed, predictable address, runs
+# tiramisu on it, and prints each incoming notification onto the tmux status
+# line of every attached client. This is the TTY-friendly analogue of dunst:
+# any program that calls notify-send / libnotify pops up inside tmux.
+#
+# Idempotent — safe to run repeatedly (e.g. from a tmux hook or at load).
+# Requires: tiramisu, dbus-daemon, tmux.
+#
+# The shells (bash/fish) export the SAME fixed DBUS_SESSION_BUS_ADDRESS so
+# that notify-send from any pane targets the very bus tiramisu listens on.
+
+set -u
+
+RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+BUS_PATH="$RUNTIME/bus"
+
+# Reuse an inherited session bus if there is one; otherwise fall back to the
+# fixed path (matches the shells' export and systemd's conventional location).
+: "${DBUS_SESSION_BUS_ADDRESS:=unix:path=$BUS_PATH}"
+export DBUS_SESSION_BUS_ADDRESS
+
+# Start the bus only when we own the fixed path and nothing is there yet.
+# (An externally-provided bus is assumed to be already running.)
+if [ "$DBUS_SESSION_BUS_ADDRESS" = "unix:path=$BUS_PATH" ] && [ ! -S "$BUS_PATH" ]; then
+    mkdir -p "$RUNTIME"
+    dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" \
+        --fork --nopidfile >/dev/null 2>&1 || exit 1
+fi
+
+# Only one bridge at a time — tiramisu owns the org.freedesktop.Notifications
+# name and a second instance would fail to acquire it anyway.
+if pgrep -x tiramisu >/dev/null 2>&1; then
+    exit 0
+fi
+
+# Route each notification to the toast presenter. --json gives structured
+# fields INCLUDING urgency (in hints), which the -o format specifier cannot
+# expose — the presenter uses it to color the popup. One JSON object per line.
+PRESENTER="$(dirname "$0")/tmux-notify-popup"
+tiramisu --json | while IFS= read -r json; do
+    [ -n "$json" ] || continue
+    printf '%s\n' "$json" | "$PRESENTER"
+done
