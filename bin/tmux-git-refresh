@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# tmux-git-refresh — re-renders every pane of the nested dashboard.
+# Bound to `C-r` in tmux-git.tmux.conf; runs via run-shell, so it inherits the
+# nested tmux socket through $TMUX.
+set -uo pipefail
+
+tmux list-panes -F '#{pane_id}' | while read -r p; do
+  tmux respawn-pane -k -t "$p"
+done

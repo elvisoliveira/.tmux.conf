@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# tmux-git — read-only two-pane git panel, synced via a fifo.
+#
+# Orchestrator. Runs under `run-shell` (no TTY of its own), so it does NOT run
+# fzf/delta itself: it only issues tmux commands that create the panes, each
+# running the right interactive script on its own TTY.
+#
+#   left pane  (working tree): tmux-git-list  — fzf with the file list
+#   right pane (diff):         tmux-git-diff  — fifo reader -> delta
+#
+# Navigating the fzf fires the `focus` event, which writes the file path to the
+# fifo; the reader pane renders the diff. No daemon, no polling: the reader dies
+# together with the window.
+#
+# Invoked by the keybinding (prefix g), which injects the active pane's directory
+# as TMUX_GIT_DIR (run-shell does not inherit the pane's cwd).
+set -euo pipefail
+
+BIN="$HOME/.env/.tmux.conf/bin"
+
+cd "${TMUX_GIT_DIR:-$PWD}" 2>/dev/null || true
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  tmux display-message "tmux-git: not a git repository"
+  exit 0
+fi
+
+root=$(git rev-parse --show-toplevel)
+fifo="${XDG_RUNTIME_DIR:-/tmp}/tmux-git.$$.fifo"
+rm -f "$fifo"
+mkfifo "$fifo"
+
+# The diff pane is the sole pane of the new window.
+diff_pane=$(tmux new-window -c "$root" -n git -P -F '#{pane_id}' \
+  -e GIT_ROOT="$root" -e FIFO="$fifo" "$BIN/tmux-git-diff")
+tmux select-pane -t "$diff_pane" -T 'diff'
+
+# Split to the left (-b) for the list; the list cleans everything up on exit (trap).
+list_pane=$(tmux split-window -h -b -t "$diff_pane" -c "$root" -P -F '#{pane_id}' \
+  -e GIT_ROOT="$root" -e FIFO="$fifo" -e DIFF_PANE="$diff_pane" "$BIN/tmux-git-list")
+tmux select-pane -t "$list_pane" -T 'working tree'
