@@ -1,0 +1,21 @@
+#!/bin/sh
+# Restore helper for tmux-resurrect — resume the RIGHT Claude Code conversation.
+#
+# tmux-resurrect types this command into the restored pane's shell, passing the
+# pane's saved `claude` arguments (via resurrect's `*` expansion):
+#   * pane had -r/--resume/--session-id/-c/--continue -> honor it exactly
+#     (panes launched with `claude --resume <id>` come back to that session)
+#   * bare `claude` (no session args)                 -> `--continue`, i.e. the
+#     most recent conversation in this directory (unambiguous when only one
+#     Claude ran per dir)
+#
+# Set CLAUDE_RESTORE_DRYRUN=1 to print the resolved command instead of running it.
+for a in "$@"; do
+    case "$a" in
+        -r|--resume|--session-id|-c|--continue)
+            [ -n "${CLAUDE_RESTORE_DRYRUN:-}" ] && { echo "claude $*"; exit 0; }
+            exec claude "$@" ;;
+    esac
+done
+[ -n "${CLAUDE_RESTORE_DRYRUN:-}" ] && { echo "claude --continue $*"; exit 0; }
+exec claude --continue "$@"
