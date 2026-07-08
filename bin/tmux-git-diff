@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# tmux-git-diff — right pane of tmux-git.
+#
+# Fifo reader: for each path received, clear the pane and render the diff via
+# delta. Read-only. Long diff? Native tmux scroll (copy-mode).
+#
+# Env (via `tmux ... -e`): GIT_ROOT, FIFO.
+#
+# Open the fifo read+write (fd 3) so `read` blocks waiting for data instead of
+# getting EOF, and so the writer side (fzf) never stalls. No -e in set: git may
+# exit non-zero and the loop must survive it.
+set -uo pipefail
+
+cd "$GIT_ROOT"
+
+exec 3<>"$FIFO"
+
+clear
+printf '  ← select a file from the list\n'
+
+while IFS= read -r f <&3; do
+  [ -n "$f" ] || continue
+
+  if git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+    # Tracked: HEAD..working tree captures staged + unstaged together.
+    raw=$(git diff HEAD -- "$f" 2>/dev/null)
+    [ -n "$raw" ] || raw=$(git diff -- "$f" 2>/dev/null)
+  else
+    # Untracked: diff against /dev/null shows the whole file as an addition.
+    raw=$(git diff --no-index -- /dev/null "$f" 2>/dev/null || true)
+  fi
+
+  clear
+  if [ -n "$raw" ]; then
+    printf '%s\n' "$raw" | delta
+  else
+    printf '  (no changes)\n'
+  fi
+done

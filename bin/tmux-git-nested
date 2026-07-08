@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# tmux-git-nested — runs INSIDE the floating pane (via tmux-git-float) and boots
+# a nested tmux, on its own socket and isolated config, with a repo dashboard.
+#
+# A float can't be split, but a NESTED tmux has its own pane tree — that's how we
+# get multiple navigable panes inside the float.
+#
+# Layout:
+#   ┌───────────────┬──────────────┐
+#   │ working tree  │              │
+#   ├───────────────┤     diff     │
+#   │ branches/tags │   (delta)    │
+#   ├───────────────┤              │
+#   │     log       │              │
+#   └───────────────┴──────────────┘
+#
+# To extend: add a `split-window ... tmux-git-pane <new-kind>` here and a case in
+# tmux-git-pane. Env: GIT_ROOT (via the orchestrator's `tmux new-pane -e`).
+set -uo pipefail
+
+root="${GIT_ROOT:?GIT_ROOT not set}"
+BIN="$HOME/.env/.tmux.conf/bin"
+conf="$BIN/tmux-git.tmux.conf"
+sock="tmux-git.$$"
+
+# fifo linking the working tree / the log to the diff pane (navigate -> detail).
+fifo="${XDG_RUNTIME_DIR:-/tmp}/tmux-git.$$.fifo"
+rm -f "$fifo"; mkfifo "$fifo"
+
+# unset TMUX: allows nesting without tmux's warning and without talking to the
+# outer server.
+unset TMUX
+
+T() { tmux -L "$sock" -f "$conf" "$@"; }
+E=(-e GIT_ROOT="$root" -e GIT_FIFO="$fifo")
+
+# Detached session (resized on attach to the float). Pane 0 = working tree.
+T new-session -d -s git -x 220 -y 50 -c "$root" "${E[@]}" "$BIN/tmux-git-pane worktree"
+T set-environment -g GIT_ROOT "$root"
+T set-environment -g GIT_FIFO "$fifo"
+
+# diff on the right (62%); then slice the left column into worktree/branches/log.
+diff_p=$(T split-window -h -d -l 62% -t git:.0 -c "$root" "${E[@]}" -P -F '#{pane_id}' "$BIN/tmux-git-pane diff")
+br_p=$(T split-window -v -d -l 66% -t git:.0 -c "$root" "${E[@]}" -P -F '#{pane_id}' "$BIN/tmux-git-pane branches")
+log_p=$(T split-window -v -d -l 50% -t "$br_p" -c "$root" "${E[@]}" -P -F '#{pane_id}' "$BIN/tmux-git-pane log")
+
+T select-pane -t git:.0   -T 'working tree'
+T select-pane -t "$br_p"  -T 'branches / tags'
+T select-pane -t "$log_p" -T 'log'
+T select-pane -t "$diff_p" -T 'diff'
+T select-pane -t git:.0
+
+# Cleanup on any exit — including SIGHUP when the float is closed from outside
+# (the line after attach would then never run). Kill the server and remove the
+# dead socket so files don't accumulate in $TMUX_TMPDIR.
+cleanup() {
+  tmux -L "$sock" kill-server 2>/dev/null || true
+  rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$sock" "$fifo"
+}
+trap cleanup EXIT HUP TERM INT
+
+# Attach in this terminal (the float).
+tmux -L "$sock" -f "$conf" attach -t git

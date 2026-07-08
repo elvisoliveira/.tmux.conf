@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# tmux-git-float — floating-pane variant (like the tmux-notify toast).
+#
+# Orchestrator. Runs under `run-shell` (no TTY): it only computes the geometry
+# and creates the floating pane with `new-pane` (same primitive as
+# tmux-notify-popup). A float can't be split, so the multi-pane dashboard lives
+# in a NESTED tmux launched inside the float (see tmux-git-nested).
+#
+# For the two-pane synced panel in a normal window, see `tmux-git` (prefix g).
+#
+# Injected by the keybinding: TMUX_GIT_DIR = the active pane's directory.
+set -euo pipefail
+
+BIN="$HOME/.env/.tmux.conf/bin"
+
+cd "${TMUX_GIT_DIR:-$PWD}" 2>/dev/null || true
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  tmux display-message "tmux-git: not a git repository"
+  exit 0
+fi
+
+root=$(git rev-parse --show-toplevel)
+
+# Geometry: float centered at 85% of the window. In new-pane, -x/-y are the SIZE
+# and -X/-Y the POSITION (the opposite of display-popup).
+read -r ww wh win < <(tmux display -p '#{window_width} #{window_height} #{session_name}:#{window_index}')
+w=$(( ww * 85 / 100 ))
+h=$(( wh * 85 / 100 ))
+x=$(( (ww - w) / 2 ))
+y=$(( (wh - h) / 2 ))
+
+tmux new-pane -t "$win" -c "$root" -e GIT_ROOT="$root" \
+  -B heavy -T ' git ' \
+  -x "$w" -y "$h" -X "$x" -Y "$y" \
+  "$BIN/tmux-git-nested"

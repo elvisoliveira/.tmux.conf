@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# tmux-git-pane <kind> — renders ONE quadrant of the nested dashboard.
+#
+#   worktree  fzf of changed files; navigating pushes "file\t<path>" to the fifo
+#   log       fzf of commits;       navigating pushes "commit\t<hash>" to the fifo
+#   branches  static list of branches + tags
+#   diff      fifo reader: renders the file's diff / the commit's `git show`
+#
+# The diff pane is the shared "detail view": it reflects the last thing you moved
+# through in the working tree OR the log. Env: GIT_ROOT, GIT_FIFO.
+#
+# Three levels of navigation:
+#   lowercase h/j/k/l  -> type into the fzf filter (case-insensitive, -i)
+#   Shift  H/J/K/L     -> move the LIST (J/K down/up, H/L top/bottom). Since the
+#                         filter ignores case, uppercase isn't needed for typing,
+#                         so it is repurposed for navigation.
+#   Ctrl   C-h/j/k/l   -> switch PANE (binding of the nested tmux)
+# Also: arrows and Ctrl+d/u (half-page) move the list. Esc/Enter/Ctrl-C are
+# ignored so fzf never quits on its own (the tmux C-q is what quits); if it quits
+# anyway, `tail` keeps the pane alive. The hints live only in the tmux status bar.
+set -uo pipefail
+
+cd "${GIT_ROOT:-.}"
+FIFO="${GIT_FIFO:-}"
+
+FZF_NAV='J:down,K:up,H:first,L:last,ctrl-d:half-page-down,ctrl-u:half-page-up'
+FZF_KEEP='esc:ignore,enter:ignore,ctrl-c:ignore,ctrl-g:ignore'
+
+case "${1:-worktree}" in
+  worktree)
+    push='printf "file\t%s\n" {2} > "$GIT_FIFO"'
+    git -c core.quotepath=false status --porcelain=v1 \
+      | while IFS= read -r line; do
+          st=${line:0:2}; path=${line:3}
+          case "$path" in *" -> "*) path=${path#* -> } ;; esac
+          printf '%s\t%s\n' "$st" "$path"
+        done \
+      | fzf --ansi -i --reverse --delimiter '\t' --with-nth '1,2' \
+            --bind "$FZF_NAV" --bind "$FZF_KEEP" \
+            --bind "start:execute-silent($push)" \
+            --bind "focus:execute-silent($push)" \
+            >/dev/null 2>&1 || true
+    exec tail -f /dev/null
+    ;;
+
+  log)
+    # Table: hash (pad 9) · date (YYYY-MM-DD) · subject truncated to 50 cols · refs.
+    # Fixed columns align; only the last (refs) is variable. The hash stays
+    # uncolored as the 1st token, so {1} extracts cleanly for `git show`.
+    push='printf "commit\t%s\n" {1} > "$GIT_FIFO"'
+    git -c color.ui=always log --color=always --date=format:'%Y-%m-%d' \
+        --pretty=format:'%<(9)%h %C(dim)%ad%C(reset)  %<(50,trunc)%s %C(auto)%d%C(reset)' -n 300 \
+      | fzf --ansi -i --reverse \
+            --bind "$FZF_NAV" --bind "$FZF_KEEP" \
+            --bind "focus:execute-silent($push)" \
+            >/dev/null 2>&1 || true
+    exec tail -f /dev/null
+    ;;
+
+  branches)
+    clear
+    printf '\033[1m── branches ──\033[0m\n'
+    git branch -vv --color=always
+    printf '\n\033[1m── tags ──\033[0m\n'
+    git tag --sort=-creatordate 2>/dev/null | head -n 20
+    exec tail -f /dev/null
+    ;;
+
+  diff)
+    if [ -z "$FIFO" ]; then echo '  (no fifo)'; exec tail -f /dev/null; fi
+    # read+write on fd 3: read blocks waiting for data (no EOF) and the writers
+    # (fzf) never stall.
+    exec 3<>"$FIFO"
+    clear
+    printf '  ← navigate the working tree or the log\n'
+    while IFS= read -r line <&3; do
+      [ -n "$line" ] || continue
+      typ=${line%%$'\t'*}; arg=${line#*$'\t'}
+      clear
+      case "$typ" in
+        file)
+          if git ls-files --error-unmatch -- "$arg" >/dev/null 2>&1; then
+            d=$(git diff HEAD -- "$arg" 2>/dev/null); [ -n "$d" ] || d=$(git diff -- "$arg" 2>/dev/null)
+          else
+            d=$(git diff --no-index -- /dev/null "$arg" 2>/dev/null || true)
+          fi
+          if [ -n "$d" ]; then printf '%s\n' "$d" | delta --paging=never; else echo '  (no changes)'; fi
+          ;;
+        commit)
+          git show --color=always "$arg" 2>/dev/null | delta --paging=never
+          ;;
+      esac
+    done
+    ;;
+
+  *)
+    echo "unknown kind: $1"; exec tail -f /dev/null
+    ;;
+esac
