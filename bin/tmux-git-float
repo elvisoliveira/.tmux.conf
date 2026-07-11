@@ -6,7 +6,6 @@
 # tmux-notify-popup). A float can't be split, so the multi-pane dashboard lives
 # in a NESTED tmux launched inside the float (see tmux-git-nested).
 #
-# For the two-pane synced panel in a normal window, see `tmux-git` (prefix g).
 #
 # Injected by the keybinding: TMUX_GIT_DIR = the active pane's directory.
 set -euo pipefail

@@ -3,7 +3,7 @@
 #
 #   worktree  fzf of changed files; navigating pushes "file\t<path>" to the fifo
 #   log       fzf of commits;       navigating pushes "commit\t<hash>" to the fifo
-#   branches  static list of branches + tags
+#   branches  fzf of branches + tags; navigating pushes "commit\t<ref>" (git show)
 #   diff      fifo reader: renders the file's diff / the commit's `git show`
 #
 # The diff pane is the shared "detail view": it reflects the last thing you moved
@@ -20,6 +20,7 @@
 # anyway, `tail` keeps the pane alive. The hints live only in the tmux status bar.
 set -uo pipefail
 
+BIN="$(dirname "$(readlink -f "$0")")"
 cd "${GIT_ROOT:-.}"
 FIFO="${GIT_FIFO:-}"
 
@@ -28,17 +29,25 @@ FZF_KEEP='esc:ignore,enter:ignore,ctrl-c:ignore,ctrl-g:ignore'
 
 case "${1:-worktree}" in
   worktree)
-    push='printf "file\t%s\n" {2} > "$GIT_FIFO"'
-    git -c core.quotepath=false status --porcelain=v1 \
-      | while IFS= read -r line; do
-          st=${line:0:2}; path=${line:3}
-          case "$path" in *" -> "*) path=${path#* -> } ;; esac
-          printf '%s\t%s\n' "$st" "$path"
-        done \
-      | fzf --ansi -i --reverse --delimiter '\t' --with-nth '1,2' \
+    # Interactive, FILTERABLE directory tree. --disabled: fzf does NOT filter the
+    # query itself — instead each keystroke reloads tmux-git-worktree {q}, which
+    # re-renders a real TREE of just the matches (with their parent dirs), so it
+    # never collapses to a flat list. Type (lowercase) to filter; ⇧J/K/H/L
+    # navigate (FZF_NAV — letters stay free for typing, like the log pane).
+    # Row = "<tree>\t<path>" (--with-nth 1 shows the tree, path rides hidden);
+    # moving to a FILE row pushes it to the fifo so the diff follows, dir rows
+    # (empty path) are skipped. --gutter/--info/--no-scrollbar drop the chrome.
+    # Push via the tmux-git-push helper (a bash script), NOT an inline bind:
+    # fzf runs binds through $SHELL, which may be fish — and fish can't parse
+    # bash var-assignment/guards. {2} is the hidden path (empty for dir rows).
+    "$BIN/tmux-git-worktree" \
+      | fzf --ansi --reverse --delimiter '\t' --with-nth 1 \
+            --disabled --prompt='filter: ' \
+            --info=hidden --no-scrollbar --gutter=' ' --pointer='▶' \
+            --bind "change:reload($BIN/tmux-git-worktree {q})+first" \
             --bind "$FZF_NAV" --bind "$FZF_KEEP" \
-            --bind "start:execute-silent($push)" \
-            --bind "focus:execute-silent($push)" \
+            --bind "start:execute-silent($BIN/tmux-git-push file {2})" \
+            --bind "focus:execute-silent($BIN/tmux-git-push file {2})" \
             >/dev/null 2>&1 || true
     exec tail -f /dev/null
     ;;
@@ -58,11 +67,16 @@ case "${1:-worktree}" in
     ;;
 
   branches)
-    clear
-    printf '\033[1m── branches ──\033[0m\n'
-    git branch -vv --color=always
-    printf '\n\033[1m── tags ──\033[0m\n'
-    git tag --sort=-creatordate 2>/dev/null | head -n 20
+    # fzf table of branches + tags (same model as the log). Row: ref · tip hash ·
+    # date · subject. The ref name is the uncolored 1st token, so {1} extracts
+    # cleanly; navigating pushes it as a "commit" so the diff runs `git show <ref>`
+    # on its tip. Newest first, branches and tags mixed by date.
+    git for-each-ref --sort=-creatordate --color=always refs/heads refs/tags \
+        --format='%(align:20,left)%(refname:short)%(end) %(color:dim)%(objectname:short) %(committerdate:format:%Y-%m-%d)%(color:reset) %(contents:subject)' \
+      | fzf --ansi -i --reverse \
+            --bind "$FZF_NAV" --bind "$FZF_KEEP" \
+            --bind "focus:execute-silent($BIN/tmux-git-push commit {1} branches)" \
+            >/dev/null 2>&1 || true
     exec tail -f /dev/null
     ;;
 
@@ -71,12 +85,18 @@ case "${1:-worktree}" in
     # read+write on fd 3: read blocks waiting for data (no EOF) and the writers
     # (fzf) never stall.
     exec 3<>"$FIFO"
-    clear
-    printf '  ← navigate the working tree or the log\n'
+    clear; tmux clear-history 2>/dev/null
+    # Seed with the whole working-tree diff (the tree pane is now a static
+    # overview and no longer drives this). The log pane can override it with a
+    # commit's `git show`.
+    d=$(git diff HEAD 2>/dev/null); [ -n "$d" ] || d=$(git diff 2>/dev/null)
+    if [ -n "$d" ]; then printf '%s\n' "$d" | delta --paging=never; else echo '  (clean working tree)'; fi
     while IFS= read -r line <&3; do
       [ -n "$line" ] || continue
       typ=${line%%$'\t'*}; arg=${line#*$'\t'}
-      clear
+      # Drop the previous diff from the scrollback so copy-mode (PageUp) scrolls
+      # only THIS diff — g/G and page-up then stay within it, not old renders.
+      clear; tmux clear-history 2>/dev/null
       case "$typ" in
         file)
           if git ls-files --error-unmatch -- "$arg" >/dev/null 2>&1; then

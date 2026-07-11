@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# tmux-git-push <type> <arg> [source] — write "<type>\t<arg>" to the diff pane's
+# fifo ($GIT_FIFO). Called from fzf's execute-silent, which runs the bind via
+# $SHELL — possibly fish, which can't parse bash var-assignment/guards. Keeping
+# the logic in this bash script (a plain external command, fish-safe) sidesteps
+# that; the fzf bind is just `tmux-git-push file {2}`.
+#
+# Empty arg (a tree DIRECTORY row, whose hidden path is empty) writes nothing.
+# fzf fires `focus` once on LOAD; for the list panes (log, branches) that would
+# clobber the diff pane's seeded working-tree diff before you navigate. So the
+# FIRST push from a given <source> is skipped (marker beside the fifo). Panes
+# with no <source> (worktree) are never skipped — their load focus lands on a
+# dir row with an empty path and writes nothing anyway.
+set -u
+typ="${1:-}"; arg="${2:-}"; src="${3:-}"
+[ -n "$arg" ] || exit 0
+[ -n "${GIT_FIFO:-}" ] || exit 0
+
+if [ -n "$src" ]; then
+  mark="$GIT_FIFO.$src.started"
+  [ -e "$mark" ] || { : >"$mark"; exit 0; }
+fi
+
+printf '%s\t%s\n' "$typ" "$arg" >"$GIT_FIFO"

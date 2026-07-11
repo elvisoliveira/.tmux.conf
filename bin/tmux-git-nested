@@ -55,7 +55,7 @@ T select-pane -t git:.0
 # dead socket so files don't accumulate in $TMUX_TMPDIR.
 cleanup() {
   tmux -L "$sock" kill-server 2>/dev/null || true
-  rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$sock" "$fifo"
+  rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$sock" "$fifo" "$fifo".*.started
 }
 trap cleanup EXIT HUP TERM INT
 
