@@ -13,6 +13,11 @@
 # dir row with an empty path and writes nothing anyway.
 set -u
 typ="${1:-}"; arg="${2:-}"; src="${3:-}"
+# The log pane now passes its whole --graph line (has spaces); pull the hash out.
+# The branches pane still passes a bare refname (no space), left untouched.
+if [ "$typ" = commit ] && [[ "$arg" == *" "* ]]; then
+  arg=$(printf '%s' "$arg" | grep -oE '[0-9a-f]{7,40}' | head -1)
+fi
 [ -n "$arg" ] || exit 0
 [ -n "${GIT_FIFO:-}" ] || exit 0
 
