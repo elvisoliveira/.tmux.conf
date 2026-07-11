@@ -29,7 +29,9 @@ h=$(( wh * 85 / 100 ))
 x=$(( (ww - w) / 2 ))
 y=$(( (wh - h) / 2 ))
 
-tmux new-pane -t "$win" -c "$root" -e GIT_ROOT="$root" \
+# TMUX_OUTER lets the nested C-z (tmux-git-zoom) grow THIS float — a pane in the
+# outer server — when zooming. It's the outer's socket,pid,session triple.
+tmux new-pane -t "$win" -c "$root" -e GIT_ROOT="$root" -e TMUX_OUTER="$TMUX" \
   -B heavy -T ' git ' \
   -x "$w" -y "$h" -X "$x" -Y "$y" \
   "$BIN/tmux-git-nested"
