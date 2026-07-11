@@ -110,7 +110,9 @@ case "${1:-worktree}" in
             then d=$(git diff HEAD -- "$arg" 2>/dev/null); [ -n "$d" ] || d=$(git diff -- "$arg" 2>/dev/null); printf '%s\n' "$d"
             else git diff --no-index -- /dev/null "$arg" 2>/dev/null
           fi ;;
-        *) d=$(git diff HEAD 2>/dev/null); [ -n "$d" ] || d=$(git diff 2>/dev/null); printf '%s\n' "$d" ;;
+        *) d=$(git diff HEAD 2>/dev/null); [ -n "$d" ] || d=$(git diff 2>/dev/null)
+           # Clean working tree -> seed with the newest commit (top of the log).
+           if [ -n "$d" ]; then printf '%s\n' "$d"; else git show --color=always HEAD 2>/dev/null; fi ;;
       esac | delta --paging=never --side-by-side --wrap-max-lines 0
       # A diff taller than the pane auto-scrolls the view to the bottom; drop into
       # copy-mode at the top so it always opens at the start of the diff. Scroll
