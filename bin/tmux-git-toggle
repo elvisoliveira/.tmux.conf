@@ -14,10 +14,16 @@ tdir="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)"
 shopt -s nullglob
 socks=( "$tdir"/tmux-git.* )
 
-if [ ${#socks[@]} -gt 0 ]; then
-  for s in "${socks[@]}"; do
-    [ -S "$s" ] && tmux -S "$s" kill-server 2>/dev/null
-  done
-else
-  exec "$BIN/tmux-git-float"
-fi
+# Close any LIVE float (kill its server → the float pane's command exits). A stale
+# socket whose server is already gone (crash / SIGKILL skips the cleanup trap) is
+# just removed, NOT treated as an open float — otherwise it would wedge the toggle,
+# failing the kill and never reopening. Open a float only if none were live.
+closed=0
+for s in "${socks[@]}"; do
+  if [ -S "$s" ] && tmux -S "$s" kill-server 2>/dev/null; then
+    closed=1
+  else
+    rm -f "$s"
+  fi
+done
+[ "$closed" = 1 ] || exec "$BIN/tmux-git-float"
