@@ -75,16 +75,17 @@ case "${1:-worktree}" in
     exec tail -f /dev/null
     ;;
 
-  branches)
-    # fzf table of branches + tags (same model as the log). Row: ref · tip hash ·
-    # date · subject. The ref name is the uncolored 1st token, so {1} extracts
-    # cleanly; navigating pushes it as a "commit" so the diff runs `git show <ref>`
-    # on its tip. Newest first, branches and tags mixed by date.
-    git for-each-ref --sort=-creatordate --color=always refs/heads refs/tags \
+  branches|tags)
+    # fzf table (same model as the log). Row: ref · tip hash · date · subject. The
+    # ref name is the uncolored 1st token, so {1} extracts cleanly; navigating
+    # pushes it as a "commit" so the diff runs `git show <ref>` on its tip. Newest
+    # first. branches = refs/heads, tags = refs/tags (own panes, own fifo source).
+    case "$1" in branches) refs=refs/heads ;; tags) refs=refs/tags ;; esac
+    git for-each-ref --sort=-creatordate --color=always "$refs" \
         --format='%(align:20,left)%(refname:short)%(end) %(color:dim)%(objectname:short) %(committerdate:format:%Y-%m-%d)%(color:reset) %(contents:subject)' \
       | fzf --ansi -i --reverse \
             --bind "$FZF_NAV" --bind "$FZF_KEEP" \
-            --bind "focus:execute-silent($BIN/tmux-git-push commit {1} branches)" \
+            --bind "focus:execute-silent($BIN/tmux-git-push commit {1} $1)" \
             >/dev/null 2>&1 || true
     exec tail -f /dev/null
     ;;
