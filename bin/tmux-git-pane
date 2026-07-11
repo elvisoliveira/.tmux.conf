@@ -95,46 +95,30 @@ case "${1:-worktree}" in
     # (fzf) never stall.
     exec 3<>"$FIFO"
 
-    # Render the LAST thing navigated (seed = whole working-tree diff, else a
-    # file's diff or a commit's `git show`), side-by-side. --width is pinned to the
-    # live pane width so delta fills the whole pane — re-read every render so a
-    # resize reflows instead of leaving the old, narrow render frozen.
-    last_typ=seed last_arg=''
+    # delta sizes itself to the pane's own tty, so every render fills 100% of the
+    # diff pane — no --width to get wrong. Static output can't reflow on its own,
+    # so poll THIS pane's width (-t $TMUX_PANE, not the active pane) and re-render
+    # the current item only when it actually changes, e.g. after a C-z zoom.
+    typ=seed arg='' w=''
     render() {
       clear; tmux clear-history 2>/dev/null
-      local w; w=$(tmux display -p '#{pane_width}' 2>/dev/null)
-      local D=(delta --paging=never --side-by-side); [ -n "$w" ] && D+=(--width "$w")
-      local d
-      case "$last_typ" in
-        seed)
-          d=$(git diff HEAD 2>/dev/null); [ -n "$d" ] || d=$(git diff 2>/dev/null)
-          if [ -n "$d" ]; then printf '%s\n' "$d" | "${D[@]}"; else echo '  (clean working tree)'; fi
-          ;;
+      case "$typ" in
+        commit) git show --color=always "$arg" 2>/dev/null ;;
         file)
-          if git ls-files --error-unmatch -- "$last_arg" >/dev/null 2>&1; then
-            d=$(git diff HEAD -- "$last_arg" 2>/dev/null); [ -n "$d" ] || d=$(git diff -- "$last_arg" 2>/dev/null)
-          else
-            d=$(git diff --no-index -- /dev/null "$last_arg" 2>/dev/null || true)
-          fi
-          if [ -n "$d" ]; then printf '%s\n' "$d" | "${D[@]}"; else echo '  (no changes)'; fi
-          ;;
-        commit)
-          git show --color=always "$last_arg" 2>/dev/null | "${D[@]}"
-          ;;
-      esac
+          if git ls-files --error-unmatch -- "$arg" >/dev/null 2>&1
+            then d=$(git diff HEAD -- "$arg" 2>/dev/null); [ -n "$d" ] || d=$(git diff -- "$arg" 2>/dev/null); printf '%s\n' "$d"
+            else git diff --no-index -- /dev/null "$arg" 2>/dev/null
+          fi ;;
+        *) d=$(git diff HEAD 2>/dev/null); [ -n "$d" ] || d=$(git diff 2>/dev/null); printf '%s\n' "$d" ;;
+      esac | delta --paging=never --side-by-side
     }
-    render; last_w=$(tmux display -p '#{pane_width}' 2>/dev/null)
-    # A read blocked on the fifo won't wake on SIGWINCH (bash restarts it), so
-    # poll: every 0.5s, if the pane width changed (e.g. C-z zoom grew it), reflow
-    # the current diff to the new width instead of leaving it frozen and narrow.
+    render
     while :; do
       if IFS= read -t 0.5 -r line <&3; then
-        [ -n "$line" ] || continue
-        last_typ=${line%%$'\t'*}; last_arg=${line#*$'\t'}
-        render; last_w=$(tmux display -p '#{pane_width}' 2>/dev/null)
+        [ -n "$line" ] && { typ=${line%%$'\t'*}; arg=${line#*$'\t'}; render; }
       else
-        w=$(tmux display -p '#{pane_width}' 2>/dev/null)
-        [ "$w" = "$last_w" ] || { render; last_w=$w; }
+        nw=$(tmux display -p -t "$TMUX_PANE" '#{pane_width}' 2>/dev/null)
+        [ "$nw" = "$w" ] || { render; w=$nw; }
       fi
     done
     ;;
