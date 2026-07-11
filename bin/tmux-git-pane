@@ -101,6 +101,7 @@ case "${1:-worktree}" in
     # the current item only when it actually changes, e.g. after a C-z zoom.
     typ=seed arg='' w=''
     render() {
+      tmux send-keys -t "$TMUX_PANE" -X cancel 2>/dev/null   # leave copy-mode (if any) so new output shows live
       clear; tmux clear-history 2>/dev/null
       case "$typ" in
         commit) git show --color=always "$arg" 2>/dev/null ;;
@@ -111,6 +112,11 @@ case "${1:-worktree}" in
           fi ;;
         *) d=$(git diff HEAD 2>/dev/null); [ -n "$d" ] || d=$(git diff 2>/dev/null); printf '%s\n' "$d" ;;
       esac | delta --paging=never --side-by-side --wrap-max-lines 0
+      # A diff taller than the pane auto-scrolls the view to the bottom; drop into
+      # copy-mode at the top so it always opens at the start of the diff. Scroll
+      # keys (C-j/C-k, ⇧J/K, C-d/C-u) work from copy-mode; prefix/C-w still switch.
+      tmux copy-mode -t "$TMUX_PANE" 2>/dev/null
+      tmux send-keys -t "$TMUX_PANE" -X history-top 2>/dev/null
     }
     render
     while :; do
