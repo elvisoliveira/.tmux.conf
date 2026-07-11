@@ -9,9 +9,9 @@
 #   ┌───────────────┬──────────────┐
 #   │ working tree  │              │
 #   ├───────────────┤     diff     │
-#   │ branches/tags │   (delta)    │
+#   │     log       │   (delta)    │
 #   ├───────────────┤              │
-#   │     log       │              │
+#   │ branches/tags │              │
 #   └───────────────┴──────────────┘
 #
 # To extend: add a `split-window ... tmux-git-pane <new-kind>` here and a case in
@@ -44,14 +44,14 @@ T new-session -d -s git -x "${size#* }" -y "${size% *}" -c "$root" "${E[@]}" "$B
 T set-environment -g GIT_ROOT "$root"
 T set-environment -g GIT_FIFO "$fifo"
 
-# diff on the right (62%); then slice the left column into worktree/branches/log.
+# diff on the right (62%); then slice the left column into worktree/log/branches.
 diff_p=$(T split-window -h -d -l 62% -t git:.0 -c "$root" "${E[@]}" -P -F '#{pane_id}' "$BIN/tmux-git-pane diff")
-br_p=$(T split-window -v -d -l 66% -t git:.0 -c "$root" "${E[@]}" -P -F '#{pane_id}' "$BIN/tmux-git-pane branches")
-log_p=$(T split-window -v -d -l 50% -t "$br_p" -c "$root" "${E[@]}" -P -F '#{pane_id}' "$BIN/tmux-git-pane log")
+log_p=$(T split-window -v -d -l 66% -t git:.0 -c "$root" "${E[@]}" -P -F '#{pane_id}' "$BIN/tmux-git-pane log")
+br_p=$(T split-window -v -d -l 50% -t "$log_p" -c "$root" "${E[@]}" -P -F '#{pane_id}' "$BIN/tmux-git-pane branches")
 
 T select-pane -t git:.0   -T 'working tree'
-T select-pane -t "$br_p"  -T 'branches / tags'
 T select-pane -t "$log_p" -T 'log'
+T select-pane -t "$br_p"  -T 'branches / tags'
 T select-pane -t "$diff_p" -T 'diff'
 T select-pane -t git:.0
 
