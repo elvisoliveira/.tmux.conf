@@ -53,16 +53,17 @@ case "${1:-worktree}" in
     ;;
 
   log)
-    # --graph tree: hash · date · subject · refs, with merge/branch topology drawn
-    # on the left. Commits not yet on ANY remote get their hash bold-red: rev-list
-    # --not --remotes lists them (abbrev 12 to match core.abbrev), then awk recolors
-    # the first hex token of each line — the still-uncolored %h. With --graph the
-    # hash is no longer fzf field {1} (that's a graph glyph), so the focus bind
-    # passes the whole line {} and tmux-git-push digs the hash out.
+    # --graph tree: hash · date · author · refs, with merge/branch topology drawn
+    # on the left. The subject lives only in the diff pane (git show); here the
+    # author is more useful. Commits not yet on ANY remote get their hash bold-red:
+    # rev-list --not --remotes lists them (abbrev 12 to match core.abbrev), then awk
+    # recolors the first hex token of each line — the still-uncolored %h. With
+    # --graph the hash is no longer fzf field {1} (that's a graph glyph), so the
+    # focus bind passes the whole line {} and tmux-git-push digs the hash out.
     unpushed=$(git rev-list --abbrev-commit --abbrev=12 HEAD --not --remotes 2>/dev/null)
     git -c core.abbrev=12 -c color.ui=always log --graph --color=always \
         --date=format:'%Y-%m-%d' \
-        --pretty=format:'%h %C(dim)%ad%C(reset)  %<(50,trunc)%s %C(auto)%d%C(reset)' -n 300 \
+        --pretty=format:'%h %C(dim)%ad%C(reset)  %<(17,trunc)%an %C(auto)%d%C(reset)' -n 300 \
       | awk -v ups="$unpushed" '
           BEGIN { n=split(ups,a,"\n"); for (i=1;i<=n;i++) if (a[i]!="") U[a[i]]=1 }
           { if (match($0,/[0-9a-f]{7,40}/)) { h=substr($0,RSTART,RLENGTH);
@@ -76,13 +77,14 @@ case "${1:-worktree}" in
     ;;
 
   branches|tags)
-    # fzf table (same model as the log). Row: ref · tip hash · date · subject. The
-    # ref name is the uncolored 1st token, so {1} extracts cleanly; navigating
-    # pushes it as a "commit" so the diff runs `git show <ref>` on its tip. Newest
-    # first. branches = refs/heads, tags = refs/tags (own panes, own fifo source).
+    # fzf table (same model as the log). Row: ref · tip hash · date (no subject —
+    # that's in the diff pane). The ref name is the uncolored 1st token, so {1}
+    # extracts cleanly; navigating pushes it as a "commit" so the diff runs
+    # `git show <ref>` on its tip. Newest first. branches = refs/heads, tags =
+    # refs/tags (own panes, own fifo source).
     case "$1" in branches) refs=refs/heads ;; tags) refs=refs/tags ;; esac
     git for-each-ref --sort=-creatordate --color=always "$refs" \
-        --format='%(align:20,left)%(refname:short)%(end) %(color:dim)%(objectname:short) %(committerdate:format:%Y-%m-%d)%(color:reset) %(contents:subject)' \
+        --format='%(align:20,left)%(refname:short)%(end) %(color:dim)%(objectname:short) %(committerdate:format:%Y-%m-%d)%(color:reset)' \
       | fzf --ansi -i --reverse \
             --bind "$FZF_NAV" --bind "$FZF_KEEP" \
             --bind "focus:execute-silent($BIN/tmux-git-push commit {1} $1)" \
