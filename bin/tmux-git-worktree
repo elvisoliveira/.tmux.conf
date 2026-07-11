@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# tmux-git-worktree [query] — emit the changed-files TREE (see tmux-git-tree),
+# optionally keeping only paths that match QUERY (case-insensitive substring).
+#
+# Used both for the initial fzf load AND fzf's `change:reload` in the worktree
+# pane, so typing re-renders a real TREE of just the matches (with their parent
+# dirs) instead of collapsing to a flat list.
+set -uo pipefail
+
+q="${1:-}"
+BIN="$(dirname "$(readlink -f "$0")")"
+
+# --untracked-files=all: list every untracked file individually (respecting
+# .gitignore) instead of collapsing a new directory into one "dir/" entry — so
+# new files nest into the tree, and it overrides a repo's showUntrackedFiles=no.
+git -c core.quotepath=false status --porcelain=v1 --untracked-files=all \
+  | while IFS= read -r line; do
+      st=${line:0:2}; path=${line:3}
+      case "$path" in *" -> "*) path=${path#* -> } ;; esac
+      # Filter on the path only (not the 2-char status), so a query like "js"
+      # never matches a status code. Empty query keeps everything.
+      case "${q:+x}" in
+        x) case "${path,,}" in *"${q,,}"*) printf '%s\t%s\n' "$st" "$path" ;; esac ;;
+        *) printf '%s\t%s\n' "$st" "$path" ;;
+      esac
+    done \
+  | python3 "$BIN/tmux-git-tree"

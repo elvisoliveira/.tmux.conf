@@ -1,0 +1,28 @@
+#!/bin/bash
+# Read a tmux pane's piped output (via `pipe-pane`) and fire a libnotify
+# notification when the pane produces new output. Throttled so a burst of
+# lines yields one notification per $COOLDOWN seconds.
+#
+# Uses notify-send (not dunstify) so it routes to whoever owns the
+# notifications name on the user bus: dunst on X11/sway, or the tmux-notifyd
+# tiramisu bridge (-> tmux toast) on the TTY. See bin/tmux-notifyd.
+#
+# Usage (from tmux pipe-pane): pane-notify.sh <label>
+#   <label>  human-readable pane id, e.g. "mysess:2.1"
+
+label="${1:-tmux pane}"
+COOLDOWN=3
+stamp="${XDG_RUNTIME_DIR:-/tmp}/tmux-pane-notify.$(echo "$label" | tr -c 'A-Za-z0-9' _)"
+
+# Stable notification id per pane so repeats replace, not stack.
+id=$(( ( $(echo "$label" | cksum | cut -d' ' -f1) % 100000 ) + 1 ))
+
+while IFS= read -r line || [ -n "$line" ]; do
+	now=$(date +%s)
+	last=0
+	[ -f "$stamp" ] && last=$(cat "$stamp" 2>/dev/null || echo 0)
+	if [ $(( now - last )) -ge "$COOLDOWN" ]; then
+		echo "$now" >"$stamp"
+		notify-send -a tmux -r "$id" -t 0 -u normal "tmux: $label" "atividade no pane"
+	fi
+done

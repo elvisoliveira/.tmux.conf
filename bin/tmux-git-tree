@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+# tmux-git-tree — turn a `status<TAB>path` stream (one changed file per line)
+# into a directory TREE for the git-panel working-tree pane.
+#
+# Emits one row per line as "<display><TAB><realpath>":
+#   - directory rows: tree glyphs + "name/", realpath EMPTY (not selectable)
+#   - file rows:      tree glyphs + name + status, realpath = the full path
+# fzf shows column 1 (the tree) and searches column 2 (the path); navigating a
+# file row pushes its realpath to the fifo. Dir rows (empty realpath) push nothing.
+import sys
+
+MID, END, PIPE, GAP = "├─ ", "└─ ", "│  ", "   "
+BLUE, YELLOW, RESET = "\033[34m", "\033[33m", "\033[0m"
+
+rows = []
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if not line:
+        continue
+    st, _, path = line.partition("\t")
+    if path:
+        rows.append((st.strip(), path))
+
+# Nested dict of path components; leaves map to their status via `status`.
+tree, status = {}, {}
+for st, path in rows:
+    parts = path.split("/")
+    node = tree
+    for p in parts:
+        node = node.setdefault(p, {})
+    status[tuple(parts)] = st
+
+out = []
+def render(node, prefix, parts):
+    keys = sorted(node, key=lambda k: (not node[k], k.lower()))  # dirs first, then files
+    for i, k in enumerate(keys):
+        last = i == len(keys) - 1
+        conn = END if last else MID
+        cur = parts + [k]
+        child = node[k]
+        if child:  # directory
+            out.append(f"{prefix}{conn}{BLUE}{k}/{RESET}\t")
+            render(child, prefix + (GAP if last else PIPE), cur)
+        else:      # file
+            st = status.get(tuple(cur), "")
+            out.append(f"{prefix}{conn}{k}  {YELLOW}{st}{RESET}\t{'/'.join(cur)}")
+
+render(tree, "", [])
+sys.stdout.write("\n".join(out) + ("\n" if out else ""))

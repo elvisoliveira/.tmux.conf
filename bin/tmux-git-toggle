@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Toggle the git float. Bound to C-g in the OUTER tmux, which intercepts C-g
+# before an open float can see it — so the close logic must live here, not in the
+# nested config. If a nested git dashboard is running, close it (kill its server,
+# which makes the float pane's command exit and the float close); otherwise open
+# a new one. TMUX_GIT_DIR is passed through by the binding for the open case.
+#
+# ponytail: closes ANY running git float, not just this window's — fine for the
+# usual one-float workflow; add per-client matching if you ever run several.
+set -u
+BIN="$(dirname "$(readlink -f "$0")")"
+tdir="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)"
+
+shopt -s nullglob
+socks=( "$tdir"/tmux-git.* )
+
+if [ ${#socks[@]} -gt 0 ]; then
+  for s in "${socks[@]}"; do
+    [ -S "$s" ] && tmux -S "$s" kill-server 2>/dev/null
+  done
+else
+  exec "$BIN/tmux-git-float"
+fi
