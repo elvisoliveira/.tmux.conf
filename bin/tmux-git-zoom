@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# tmux-git-zoom — the float side of C-z. The binding already toggled zoom in the
+# NESTED tmux; here we resize the FLOAT itself (a pane in the OUTER tmux) to match:
+# near-fullscreen while zoomed, back to the usual 85% when not. Without this the
+# zoom only fills the 85% float and gains no real screen.
+#
+# The float is the outer's ACTIVE pane while focused, so we target it implicitly.
+# TMUX_OUTER (socket,pid,session) is injected by tmux-git-float; if it's missing
+# we just leave the plain nested zoom in place.
+set -u
+[ -n "${TMUX_OUTER:-}" ] || exit 0
+out=( tmux -S "${TMUX_OUTER%%,*}" )
+
+# `tmux` (no -S) here is the nested server that ran us — read its zoom state.
+if [ "$(tmux display -p '#{window_zoomed_flag}')" = 1 ]; then
+  "${out[@]}" resize-pane -x 100% -y 100%
+else
+  read -r ww wh < <("${out[@]}" display -p '#{window_width} #{window_height}')
+  "${out[@]}" resize-pane -x "$(( ww * 85 / 100 ))" -y "$(( wh * 85 / 100 ))"
+fi
+"${out[@]}" move-pane -P center
