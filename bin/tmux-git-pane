@@ -110,7 +110,7 @@ case "${1:-worktree}" in
             else git diff --no-index -- /dev/null "$arg" 2>/dev/null
           fi ;;
         *) d=$(git diff HEAD 2>/dev/null); [ -n "$d" ] || d=$(git diff 2>/dev/null); printf '%s\n' "$d" ;;
-      esac | delta --paging=never --side-by-side
+      esac | delta --paging=never --side-by-side --wrap-max-lines 0
     }
     render
     while :; do
