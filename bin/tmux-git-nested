@@ -34,8 +34,13 @@ unset TMUX
 T() { tmux -L "$sock" -f "$conf" "$@"; }
 E=(-e GIT_ROOT="$root" -e GIT_FIFO="$fifo")
 
-# Detached session (resized on attach to the float). Pane 0 = working tree.
-T new-session -d -s git -x 220 -y 50 -c "$root" "${E[@]}" "$BIN/tmux-git-pane worktree"
+# Detached session sized to the float NOW (this script runs inside the float, so
+# its own tty is the float). Born at the right size, the split %s and the fzf
+# panes render correctly on the first attach — otherwise a fixed birth size only
+# reflows on attach, leaving the panes wrong until a manual resize (zoom) fixes it.
+# Pane 0 = working tree.
+size=$(stty size 2>/dev/null) || size='50 220'
+T new-session -d -s git -x "${size#* }" -y "${size% *}" -c "$root" "${E[@]}" "$BIN/tmux-git-pane worktree"
 T set-environment -g GIT_ROOT "$root"
 T set-environment -g GIT_FIFO "$fifo"
 
