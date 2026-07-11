@@ -61,6 +61,17 @@ T select-pane -t git:.0
 cleanup() {
   tmux -L "$sock" kill-server 2>/dev/null || true
   rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$sock" "$fifo" "$fifo".*.started
+  # Undo the outer auto-lock, but only if the float turned it on (a manual lock
+  # that predated the float keeps its state). The flag holds the locked session's
+  # name; -u reverts each option to its global default. Mirrors the C-Space unlock.
+  if [ -n "${TMUX_OUTER:-}" ]; then
+    osock="${TMUX_OUTER%%,*}"
+    lsess=$(tmux -S "$osock" show -gv @git-autolock 2>/dev/null || true)
+    if [ -n "$lsess" ]; then
+      tmux -S "$osock" set -t "$lsess" -u prefix \; set -t "$lsess" -u key-table \; \
+        set -t "$lsess" -u status-style \; set -gu @git-autolock \; refresh-client -S
+    fi
+  fi
 }
 trap cleanup EXIT HUP TERM INT
 
