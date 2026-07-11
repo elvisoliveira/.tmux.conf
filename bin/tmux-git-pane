@@ -53,23 +53,15 @@ case "${1:-worktree}" in
     ;;
 
   log)
-    # --graph tree: hash · date · author · refs, with merge/branch topology drawn
-    # on the left. The subject lives only in the diff pane (git show); here the
-    # author is more useful. Commits not yet on ANY remote get their hash bold-red:
-    # rev-list --not --remotes lists them (abbrev 12 to match core.abbrev), then awk
-    # recolors the first hex token of each line — the still-uncolored %h. With
-    # --graph the hash is no longer fzf field {1} (that's a graph glyph), so the
-    # focus bind passes the whole line {} and tmux-git-push digs the hash out.
-    unpushed=$(git rev-list --abbrev-commit --abbrev=12 HEAD --not --remotes 2>/dev/null)
-    git -c core.abbrev=12 -c color.ui=always log --graph --color=always \
-        --date=format:'%Y-%m-%d' \
-        --pretty=format:'%h %C(dim)%ad%C(reset)  %<(17,trunc)%an %C(auto)%d%C(reset)' -n 300 \
-      | awk -v ups="$unpushed" '
-          BEGIN { n=split(ups,a,"\n"); for (i=1;i<=n;i++) if (a[i]!="") U[a[i]]=1 }
-          { if (match($0,/[0-9a-f]{7,40}/)) { h=substr($0,RSTART,RLENGTH);
-              if (h in U) $0=substr($0,1,RSTART-1) "\033[1;31m" h "\033[0m" substr($0,RSTART+RLENGTH) }
-            print }' \
-      | fzf --ansi -i --reverse \
+    # tmux-git-log renders the content: hash · date · author · refs (subject lives
+    # only in the diff pane). No query -> a --graph tree; typing -> a flat filtered
+    # list (--disabled + change:reload, so filtering never orphans graph glyphs —
+    # same model as the worktree pane). The hash isn't a fixed fzf field (a graph
+    # glyph may precede it), so the focus bind passes the whole line {} and
+    # tmux-git-push digs the hash out.
+    "$BIN/tmux-git-log" \
+      | fzf --ansi --reverse --disabled --prompt='filter: ' \
+            --bind "change:reload($BIN/tmux-git-log {q})+first" \
             --bind "$FZF_NAV" --bind "$FZF_KEEP" \
             --bind "focus:execute-silent($BIN/tmux-git-push commit {} log)" \
             >/dev/null 2>&1 || true

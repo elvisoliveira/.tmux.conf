@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# tmux-git-log [query] — the log pane's content. No query: a --graph tree. With a
+# query: a FLAT, filtered list (case-insensitive substring on the row) — filtering
+# a --graph tree would orphan its connector glyphs, so the graph is dropped while
+# filtering. Unpushed commits (rev-list --not --remotes) get a bold-red hash both
+# ways. Used for the initial fzf load AND fzf's change:reload, like tmux-git-worktree.
+set -uo pipefail
+
+q="${1:-}"
+unpushed=$(git rev-list --abbrev-commit --abbrev=12 HEAD --not --remotes 2>/dev/null)
+fmt='%h %C(dim)%ad%C(reset)  %<(17,trunc)%an %C(auto)%d%C(reset)'
+
+# Bold-red the hash of every commit not on a remote. The hash is the first hex
+# token of the line (uncolored %h), so match it and wrap it.
+recolor() {
+  awk -v ups="$unpushed" '
+    BEGIN { n=split(ups,a,"\n"); for (i=1;i<=n;i++) if (a[i]!="") U[a[i]]=1 }
+    { if (match($0,/[0-9a-f]{7,40}/)) { h=substr($0,RSTART,RLENGTH);
+        if (h in U) $0=substr($0,1,RSTART-1) "\033[1;31m" h "\033[0m" substr($0,RSTART+RLENGTH) }
+      print }'
+}
+
+if [ -z "$q" ]; then
+  git -c core.abbrev=12 -c color.ui=always log --graph --color=always \
+      --date=format:'%Y-%m-%d' --pretty=format:"$fmt" -n 300 | recolor
+else
+  git -c core.abbrev=12 -c color.ui=always log --color=always \
+      --date=format:'%Y-%m-%d' --pretty=format:"$fmt" -n 300 | recolor \
+    | grep -iF -- "$q" || true
+fi
