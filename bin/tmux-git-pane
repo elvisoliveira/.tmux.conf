@@ -25,7 +25,7 @@ cd "${GIT_ROOT:-.}"
 FIFO="${GIT_FIFO:-}"
 
 FZF_NAV='J:down,K:up,H:first,L:last,ctrl-d:half-page-down,ctrl-u:half-page-up'
-FZF_KEEP='esc:ignore,enter:ignore,ctrl-c:ignore,ctrl-g:ignore'
+FZF_KEEP='esc:ignore,enter:ignore,ctrl-c:ignore,ctrl-g:ignore,ctrl-q:ignore'
 
 case "${1:-worktree}" in
   worktree)
