@@ -91,6 +91,9 @@ case "${1:-worktree}" in
 
   diff)
     if [ -z "$FIFO" ]; then echo '  (no fifo)'; exec tail -f /dev/null; fi
+    # Compact side-by-side render (two columns fit the ~136-col diff pane; delta
+    # reads the pane width from the tty). Every diff/show below pipes through this.
+    DELTA=(delta --paging=never --side-by-side)
     # read+write on fd 3: read blocks waiting for data (no EOF) and the writers
     # (fzf) never stall.
     exec 3<>"$FIFO"
@@ -99,7 +102,7 @@ case "${1:-worktree}" in
     # overview and no longer drives this). The log pane can override it with a
     # commit's `git show`.
     d=$(git diff HEAD 2>/dev/null); [ -n "$d" ] || d=$(git diff 2>/dev/null)
-    if [ -n "$d" ]; then printf '%s\n' "$d" | delta --paging=never; else echo '  (clean working tree)'; fi
+    if [ -n "$d" ]; then printf '%s\n' "$d" | "${DELTA[@]}"; else echo '  (clean working tree)'; fi
     while IFS= read -r line <&3; do
       [ -n "$line" ] || continue
       typ=${line%%$'\t'*}; arg=${line#*$'\t'}
@@ -113,10 +116,10 @@ case "${1:-worktree}" in
           else
             d=$(git diff --no-index -- /dev/null "$arg" 2>/dev/null || true)
           fi
-          if [ -n "$d" ]; then printf '%s\n' "$d" | delta --paging=never; else echo '  (no changes)'; fi
+          if [ -n "$d" ]; then printf '%s\n' "$d" | "${DELTA[@]}"; else echo '  (no changes)'; fi
           ;;
         commit)
-          git show --color=always "$arg" 2>/dev/null | delta --paging=never
+          git show --color=always "$arg" 2>/dev/null | "${DELTA[@]}"
           ;;
       esac
     done
