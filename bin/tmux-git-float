@@ -29,6 +29,20 @@ h=$(( wh * 85 / 100 ))
 x=$(( (ww - w) / 2 ))
 y=$(( (wh - h) / 2 ))
 
+# Auto-lock the OUTER tmux while the float is open, mirroring its C-Space lock:
+# prefix -> None so a C-b passes through to the float and drives the git panes
+# (prefix2). Target the session explicitly (-t) and stash its name in a global
+# flag so the nested cleanup can unlock exactly this session — and only if WE
+# locked it (a pre-existing manual lock is left as it was).
+if [ "$(tmux show -gv key-table 2>/dev/null)" != off ]; then
+  sess=$(tmux display -p '#{session_name}')
+  tmux set -g @git-autolock "$sess" \; \
+      set -t "$sess" prefix None \; \
+      set -t "$sess" key-table off \; \
+      set -t "$sess" status-style 'bg=colour52,fg=colour255' \; \
+      refresh-client -S
+fi
+
 # TMUX_OUTER lets the nested C-z (tmux-git-zoom) grow THIS float — a pane in the
 # outer server — when zooming. It's the outer's socket,pid,session triple.
 tmux new-pane -t "$win" -c "$root" -e GIT_ROOT="$root" -e TMUX_OUTER="$TMUX" \
