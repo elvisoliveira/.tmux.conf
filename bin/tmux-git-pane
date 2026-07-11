@@ -61,6 +61,7 @@ case "${1:-worktree}" in
     # tmux-git-push digs the hash out.
     "$BIN/tmux-git-log" \
       | fzf --ansi --reverse --disabled --prompt='filter: ' \
+            --info=hidden --no-scrollbar \
             --bind "change:reload($BIN/tmux-git-log {q})+first" \
             --bind "$FZF_NAV" --bind "$FZF_KEEP" \
             --bind "focus:execute-silent($BIN/tmux-git-push commit {} log)" \
@@ -77,7 +78,7 @@ case "${1:-worktree}" in
     case "$1" in branches) refs=refs/heads ;; tags) refs=refs/tags ;; esac
     git for-each-ref --sort=-creatordate --color=always "$refs" \
         --format='%(align:20,left)%(refname:short)%(end) %(color:dim)%(objectname:short) %(committerdate:format:%Y-%m-%d)%(color:reset)' \
-      | fzf --ansi -i --reverse \
+      | fzf --ansi -i --reverse --info=hidden --no-scrollbar \
             --bind "$FZF_NAV" --bind "$FZF_KEEP" \
             --bind "focus:execute-silent($BIN/tmux-git-push commit {1} $1)" \
             >/dev/null 2>&1 || true
