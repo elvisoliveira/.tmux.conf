@@ -3,12 +3,13 @@
 # Usage: font-size up | down
 #
 # State persisted in ~/.cache/tty-font-size.
-# Prerequisites: terminus-font installed + sudoers NOPASSWD for setfont
-# (run ~/permitir-setfont.sh once).
+# Prerequisites: ter-powerline-*.psf.gz in $FONTDIR (from powerline/fonts)
+# + sudoers NOPASSWD for setfont (run ~/permitir-setfont.sh once).
 
 set -u
 
 SIZES="12 14 16 18 20 22 24 28 32"
+FONTDIR="$HOME/.local/share/consolefonts"
 STATE="$HOME/.cache/tty-font-size"
 TERMNAME="${TMUX_TERM:-$TERM}"
 direction="${1:-up}"
@@ -46,7 +47,7 @@ case "$direction" in
 esac
 
 if [ "$next" = "$current" ]; then
-    [ -n "${TMUX:-}" ] && tmux display-message "Font: ter-v${current}n (limit)"
+    [ -n "${TMUX:-}" ] && tmux display-message "Font: ter-powerline-v${current}n (limit)"
     exit 0
 fi
 
@@ -60,9 +61,9 @@ if [ -n "${TMUX_TTY:-}" ]; then
 else
     vt=$(fgconsole 2>/dev/null || echo 1)
 fi
-if sudo -n setfont -C "/dev/tty$vt" "ter-v${next}n" 2>/dev/null; then
+if sudo -n setfont -C "/dev/tty$vt" "$FONTDIR/ter-powerline-v${next}n.psf.gz" 2>/dev/null; then
     echo "$next" > "$STATE"
-    [ -n "${TMUX:-}" ] && tmux display-message "Font: ter-v${next}n"
+    [ -n "${TMUX:-}" ] && tmux display-message "Font: ter-powerline-v${next}n"
 else
-    [ -n "${TMUX:-}" ] && tmux display-message "Failed: ter-v${next}n (run ~/permitir-setfont.sh)"
+    [ -n "${TMUX:-}" ] && tmux display-message "Failed: ter-powerline-v${next}n (run ~/permitir-setfont.sh)"
 fi

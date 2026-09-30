@@ -55,24 +55,22 @@ sysfs node, so it does not touch the framebuffer, WiFi, or running processes;
 background work keeps going. The bind opens it in a throwaway window so its
 `dd` read has its own stdin; the window closes when the script exits.
 
-It needs the `brightness` node to be group-writable. A udev rule grants that
-to the `video` group; since the node already exists at boot (an `add` rule
-won't fire retroactively), also fix it in place once:
+It needs the `brightness` sysfs attribute writable by the `video` group.
+udev's `MODE`/`GROUP` keys only apply to `/dev` nodes, and a backlight has
+none — `brightness` lives under `/sys` — so the rule must `chgrp`/`chmod` it
+explicitly via `RUN+=`, which re-applies on every boot:
 
 ```sh
-echo 'SUBSYSTEM=="backlight", ACTION=="add", KERNEL=="intel_backlight", MODE="0664", GROUP="video"' \
+echo 'ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="intel_backlight", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness", RUN+="/bin/chmod g+w /sys/class/backlight/%k/brightness"' \
   | sudo tee /etc/udev/rules.d/90-backlight.rules
 sudo udevadm control --reload-rules
-sudo udevadm trigger -s backlight
-
-sudo chgrp video /sys/class/backlight/intel_backlight/brightness
-sudo chmod g+w   /sys/class/backlight/intel_backlight/brightness
+sudo udevadm trigger -c add -s backlight   # apply now (and on every boot)
 
 sudo usermod -aG video "$USER"   # if not already in the video group
 ```
 
-`~/permitir-backlight.sh` automates exactly this. The group change only
-applies to new sessions.
+`~/permitir-backlight.sh` automates this. The group change only applies to new
+sessions.
 
 ## TTY font size (`font-size`)
 
