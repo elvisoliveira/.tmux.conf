@@ -4,8 +4,8 @@
 # Claude Code, downloads, syncs etc keep running normally in the background.
 #
 # Prerequisite: the user needs write permission on
-# /sys/class/backlight/intel_backlight/brightness — granted via a udev rule
-# that ~/permitir-backlight.sh applies (video group + 0664).
+# /sys/class/backlight/intel_backlight/brightness — see README.md in this
+# folder for the udev rule (video group, g+w).
 
 BL=/sys/class/backlight/intel_backlight
 BRIGHTNESS=$BL/brightness

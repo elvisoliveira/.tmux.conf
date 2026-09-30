@@ -1,0 +1,20 @@
+#!/bin/sh
+# SUDO_ASKPASS helper: sends the sudo-tty-agent the real sudo command (read from
+# /proc of the parent process, which IS sudo itself) and the agent's
+# self-declared justification (if any in $XDG_RUNTIME_DIR/sudo-reason), and
+# returns the password.
+RT=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+D=$RT/sudo-tty-agent
+[ -p "$D/req" ] || { echo "sudo-tty-agent is not running" >&2; exit 1; }
+CMD=$(tr '\0' ' ' < /proc/$PPID/cmdline 2>/dev/null | tr -d '\n')
+# Justification: consumed once, ignored if older than 60s. NOT verified.
+REASON=
+if [ -f "$RT/sudo-reason" ]; then
+    mt=$(stat -c %Y "$RT/sudo-reason" 2>/dev/null || echo 0)
+    [ $(( $(date +%s) - mt )) -le 60 ] && REASON=$(head -c 600 "$RT/sudo-reason" | tr '\n' ' ')
+    rm -f "$RT/sudo-reason"
+fi
+# Protocol: line 1 = command, line 2 = justification (one line, may be empty)
+printf '%s\n%s\n' "${CMD:-unknown command}" "$REASON" > "$D/req"
+IFS= read -r pass < "$D/resp"
+printf '%s' "$pass"

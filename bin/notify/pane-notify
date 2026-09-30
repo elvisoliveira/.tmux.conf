@@ -5,9 +5,9 @@
 #
 # Uses notify-send (not dunstify) so it routes to whoever owns the
 # notifications name on the user bus: dunst on X11/sway, or the tmux-notifyd
-# tiramisu bridge (-> tmux toast) on the TTY. See bin/tmux-notifyd.
+# tiramisu bridge (-> tmux toast) on the TTY. See tmux-notifyd (same folder).
 #
-# Usage (from tmux pipe-pane): pane-notify.sh <label>
+# Usage (from tmux pipe-pane): pane-notify <label>
 #   <label>  human-readable pane id, e.g. "mysess:2.1"
 
 label="${1:-tmux pane}"

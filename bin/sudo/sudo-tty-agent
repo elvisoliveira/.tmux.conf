@@ -1,0 +1,27 @@
+#!/bin/sh
+# Password agent for sudo -A: run it in a terminal of yours and leave it in the
+# foreground. When Claude runs sudo, the exact command and the password prompt
+# show up HERE; the password goes to sudo over a FIFO (0600), never through Claude.
+D=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/sudo-tty-agent
+mkdir -p -m700 "$D"
+rm -f "$D/req" "$D/resp"
+mkfifo -m600 "$D/req" "$D/resp"
+trap 'stty echo 2>/dev/null; rm -rf "$D"; exit 0' INT TERM EXIT
+echo "[sudo-tty-agent] waiting for password requests (Ctrl+C to quit)"
+while :; do
+    # Protocol: line 1 = command, line 2 = justification (optional). Both reads
+    # under the same redirection — closing the FIFO between them would drop the 2nd.
+    { IFS= read -r cmd; IFS= read -r reason; } < "$D/req"
+    [ -n "$cmd" ] || continue
+    printf '\n[sudo-tty-agent] Authorizing execution of:\n    %s\n' "$cmd"
+    if [ -n "$reason" ]; then
+        printf '[sudo-tty-agent] Justification (self-declared by the agent, not verified):\n    %s\n' "$reason"
+    fi
+    printf 'Password: '
+    stty -echo
+    IFS= read -r pass
+    stty echo
+    printf '\n'
+    printf '%s\n' "$pass" > "$D/resp"
+    pass=
+done
