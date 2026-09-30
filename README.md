@@ -7,8 +7,8 @@ ln -s (pwd)/.tmux.conf ~/.tmux.conf
 
 ## Layout
 
-- `bin/` — generic tmux helpers: status-bar segments, `tmux-swap-pane`,
-  `claude-resume-restore`, and the `askpass-*` / `sudo-tty-agent` sudo helpers.
+- `bin/` — generic tmux helpers: status-bar segments, `tmux-swap-pane` and
+  the `askpass-*` / `sudo-tty-agent` sudo helpers.
 - `bin/notify/` — notify-send → tmux toast bridge (`tmux-notifyd`,
   `tmux-notify-popup`, `pane-notify`).
 - `bin/git/` — the floating git dashboard (`tmux-git-*`, prefix-less `C-g`).
