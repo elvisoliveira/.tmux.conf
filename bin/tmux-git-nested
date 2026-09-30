@@ -63,7 +63,7 @@ T select-pane -t git:.0
 # dead socket so files don't accumulate in $TMUX_TMPDIR.
 cleanup() {
   tmux -L "$sock" kill-server 2>/dev/null || true
-  rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$sock" "$fifo" "$fifo".*.started
+  rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$sock" "$fifo" "$fifo".cur "$fifo".cur.* "$fifo".*.started
   # Undo the outer auto-lock, but only if the float turned it on (a manual lock
   # that predated the float keeps its state). The flag holds the locked session's
   # name; -u reverts each option to its global default. Mirrors the C-Space unlock.

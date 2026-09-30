@@ -26,4 +26,11 @@ if [ -n "$src" ]; then
   [ -e "$mark" ] || { : >"$mark"; exit 0; }
 fi
 
-printf '%s\t%s\n' "$typ" "$arg" >"$GIT_FIFO"
+# State file + poke: rapid navigation outruns the diff pane's slow renders, and
+# fzf coalesces focus events — a queued-lines fifo can lose the FINAL selection
+# for good. So the selection lives in $GIT_FIFO.cur (atomic mv; last write wins)
+# and the fifo carries only a wakeup byte. A lost poke costs at most one 0.5s
+# poll on the reader side, which re-reads the state file anyway.
+printf '%s\t%s\n' "$typ" "$arg" >"$GIT_FIFO.cur.$$"
+mv -f "$GIT_FIFO.cur.$$" "$GIT_FIFO.cur"
+printf '\n' >"$GIT_FIFO"
