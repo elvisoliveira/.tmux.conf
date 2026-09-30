@@ -4,6 +4,7 @@
 # the parent process). The password goes to sudo over a 0600 FIFO in tmpfs.
 # Fallback: sudo-tty-agent (if running); otherwise fails with a warning.
 set -u
+BIN=$(dirname "$(readlink -f "$0")")
 CMD=$(tr '\0' ' ' < /proc/$PPID/cmdline 2>/dev/null | tr -d '\n')
 RT=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 
@@ -17,48 +18,28 @@ if [ -f "$RT/sudo-reason" ]; then
     rm -f "$RT/sudo-reason"
 fi
 
-# The most recently active tmux client gets the popup
+# The most recently active tmux client gets the popup.
 client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null \
          | sort -rn | awk 'NR==1{print $2}')
-
 if [ -n "$client" ]; then
     D=$(mktemp -d "$RT/sudo-ask.XXXXXX") || exit 1
-    mkfifo -m600 "$D/pass" || { rm -rf "$D"; exit 1; }
     trap 'rm -rf "$D"' EXIT
+    mkfifo -m600 "$D/pass" || exit 1
     printf '%s' "${CMD:-unknown command}" > "$D/cmd"
     printf '%s' "$REASON" > "$D/reason"
-    # The command travels by file (no interpolating content into shell); the
-    # prompt.sh never contains the password. Command first (authoritative),
-    # justification after, already truncated — so it can't push the command
-    # off the screen.
-    cat > "$D/prompt.sh" <<EOP
-#!/bin/sh
-printf '\\033[1mAuthorizing execution of:\\033[0m\n\n    %s\n\n' "\$(cat '$D/cmd')"
-if [ -s '$D/reason' ]; then
-    printf '\\033[2mJustification (self-declared by the agent, not verified):\\033[0m\n'
-    sed 's/^/    /' '$D/reason'
-    printf '\n\n'
-fi
-printf 'Password (Esc cancels): '
-stty -echo 2>/dev/null
-IFS= read -r p
-stty echo 2>/dev/null
-printf '\n'
-printf '%s\n' "\$p" > '$D/pass'
-EOP
-    tmux display-popup -c "$client" -T ' sudo ' -w 80% -h 40% -E "sh '$D/prompt.sh'" 2>/dev/null &
-    pop=$!
-    exec 3<>"$D/pass"   # open rw so open() never blocks
+    # Open the fifo read-write first so the prompt's write never blocks, then
+    # run the popup in the foreground: display-popup -E returns only when the
+    # popup closes (answer or Esc), so no polling is needed.
+    exec 3<>"$D/pass"
+    tmux display-popup -c "$client" -T ' sudo ' -w 80% -h 40% -E "'$BIN/askpass-prompt' '$D'" 2>/dev/null
     pass=
-    while :; do
-        IFS= read -r -t 1 -u 3 pass && break
-        if ! kill -0 "$pop" 2>/dev/null; then
-            # popup closed (Esc?); one last read against a timing race
-            IFS= read -r -t 1 -u 3 pass && break
-            exit 1
-        fi
-    done
-    [ -n "$pass" ] || exit 1
+    IFS= read -r -t 1 -u 3 pass
+    if [ -z "$pass" ]; then
+        # Cancelled (Esc / popup closed). sudo would otherwise re-run the
+        # askpass up to passwd_tries times; interrupt it so Esc really cancels.
+        kill -INT "$PPID" 2>/dev/null
+        exit 1
+    fi
     printf '%s' "$pass"
     exit 0
 fi

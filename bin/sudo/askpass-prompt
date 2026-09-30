@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Runs INSIDE the tmux popup opened by askpass-tmux. $1 is the request dir
+# holding cmd (authoritative), reason (optional, already truncated) and the
+# pass fifo. Never contains the password itself; it only writes it to the fifo.
+# Reads key by key so Esc cancels at once: tmux only closes a popup on Esc when
+# no command is running in it, so a plain `read` would swallow the Escape.
+D=$1
+printf '\033[1mAuthorizing execution of:\033[0m\n\n    %s\n\n' "$(cat "$D/cmd")"
+if [ -s "$D/reason" ]; then
+    printf '\033[2mJustification (self-declared by the agent, not verified):\033[0m\n'
+    sed 's/^/    /' "$D/reason"
+    printf '\n\n'
+fi
+printf 'Password (Esc cancels): '
+p=
+while IFS= read -rs -n1 c; do
+    case $c in
+        $'\e')          exit 1 ;;            # Esc: nothing written -> cancel
+        ''|$'\n')       break ;;             # Enter
+        $'\x7f'|$'\b')  p=${p%?} ;;          # Backspace
+        *)              p+=$c ;;
+    esac
+done
+printf '\n'
+printf '%s\n' "$p" > "$D/pass"
