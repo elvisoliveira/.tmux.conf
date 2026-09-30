@@ -9,8 +9,11 @@
 # tmux options (set -g):
 #   @notify-popup-duration   seconds the toast stays up      (default 4)
 #
-# display-popup is modal per client (it grabs that client's input while open),
-# so keep the duration short. Each popup is backgrounded because the CLI call
+# Preferred renderer is a floating pane (new-pane, tmux >= 3.7). With tmux >=
+# 3.8 it is opened with -A so it floats ABOVE a zoomed window without unzooming
+# it; older servers unzoom (3.7c) or would crash (3.7b), so there the toast falls
+# back to a modal display-popup. Popups grab the client's input while open, so
+# keep the duration short. Each popup is backgrounded because the CLI call
 # blocks until the popup closes.
 
 set -u
@@ -81,10 +84,11 @@ h=$((blines + 2))
 # back to a modal popup on older servers.
 # --- toast renderers (use the geometry/style computed above) ----------------
 # Floating, non-modal, top-right, auto-closing. For new-pane, -x/-y are the SIZE
-# and -X/-Y the position (opposite of display-popup).
+# and -X/-Y the position (opposite of display-popup). $above is "-A" when the
+# server supports staying above a zoomed window (tmux >= 3.8), else empty.
 _float() {  # $1=sock  $2=target-window  $3=window-width
     _fx=$(( ${3:-80} - w - 1 )); [ "$_fx" -lt 0 ] && _fx=0
-    tmux -S "$1" new-pane -d -t "$2" -x "$w" -y "$h" -X "$_fx" -Y 1 \
+    tmux -S "$1" new-pane $above -d -t "$2" -x "$w" -y "$h" -X "$_fx" -Y 1 \
         -S "$pbstyle" -R "$pbstyle" -T "$title" "cat '$tmpf'; sleep $DUR" >/dev/null 2>&1
 }
 # Modal popup — crash-safe. -k: any key dismisses it, so it yields to your typing
@@ -103,16 +107,16 @@ for sock in "$SOCKDIR"/*; do
 
     # Does this server support floating panes, and are they allowed?
     # `set -g @notify-force-popup on` forces the stable modal popup everywhere.
-    supports_float=no
+    # Floating panes need new-pane (>= 3.7); -A (>= 3.8, "above zoom") keeps a
+    # zoomed window zoomed while the toast floats over it. Without -A a 3.7 server
+    # unzooms on open (3.7c) or crashes (3.7b), so only float when -A is there.
+    supports_float=no above=
     force_popup=$(tmux -S "$sock" show-option -gqv @notify-force-popup 2>/dev/null)
-    [ "$force_popup" != "on" ] \
-        && tmux -S "$sock" list-commands new-pane 2>&1 | grep -q '^new-pane' \
-        && supports_float=yes
-    # Float whenever the server supports it — no zoom special-casing. The
-    # floating-pane-over-zoomed-window crash is fixed by the local spawn.c/
-    # window.c patch, so a zoomed window is safe: the toast floats over it, and
-    # closing the toast unzooms the window (re-zoom manually). @notify-force-popup
-    # (folded into supports_float above) still forces the modal popup.
+    usage=$(tmux -S "$sock" list-commands new-pane 2>/dev/null)
+    case "$force_popup:$usage" in
+        on:*)                 ;;
+        *':new-pane '*'[-A'*) supports_float=yes above=-A ;;
+    esac
     tmux -S "$sock" list-clients \
         -F "#{client_name}${TAB}#{session_name}:#{window_index}${TAB}#{window_width}" 2>/dev/null \
     | while IFS="$TAB" read -r cname tgt ww; do
