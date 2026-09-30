@@ -5,12 +5,16 @@ touch-scroll-daemon: a vertical touchscreen drag -> PageUp/PageDown.
 Reads the touchscreen via evdev and injects PageUp/PageDown keys through a
 virtual keyboard (uinput). Meant for scrolling in contexts where PageUp/Down
 make sense (e.g. tmux copy-mode, less, vim) on a real TTY -- touch-scroll-ctl
-is what decides when to start/stop it based on context.
+is what decides when to start/stop it based on context. As a second gate,
+keys are only injected while the active VT is a text console with a tmux
+client attached, so switching to the GNOME/Wayland VT pauses injection.
 
 Needs access to /dev/input/* (input group) and /dev/uinput (udev rule).
 """
 
+import subprocess
 import sys
+import time
 
 from evdev import InputDevice, UInput, ecodes, list_devices
 
@@ -30,6 +34,13 @@ NATURAL = True
 
 # Minimum distance (as a fraction of the range) to count as movement, not a tap.
 TAP_DEADZONE = 0.02
+
+# Only inject keys while the active VT is a text console with a tmux client
+# attached. Switching to the GNOME/Wayland VT (Ctrl+Alt+Fn) with the daemon
+# still running would otherwise leak PageUp/Down into the focused window on
+# top of the compositor's own touch handling.
+ACTIVE_VT_PATH = "/sys/class/tty/tty0/active"
+VT_CACHE_TTL = 1.0  # seconds between tmux client re-checks
 
 
 # --- daemon ---------------------------------------------------------------
@@ -64,6 +75,17 @@ def abs_y_range(dev):
     return info.min, info.max
 
 
+def tmux_text_ttys():
+    """Set of real TTYs (/dev/ttyN) that have a tmux client attached."""
+    try:
+        out = subprocess.run(["tmux", "list-clients", "-F", "#{client_tty}"],
+                             capture_output=True, text=True, timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return {t for t in (line.strip() for line in out.stdout.splitlines())
+            if t.startswith("/dev/tty") and t[len("/dev/tty"):].isdigit()}
+
+
 def main():
     dev = find_device()
     y_min, y_max = abs_y_range(dev)
@@ -85,7 +107,27 @@ def main():
     anchor = None      # reference Y position of the last fire
     moved = 0.0        # max displacement since the touch (for the deadzone)
 
+    last_vt = None     # active VT at the last check
+    vt_allowed = False
+    vt_checked = 0.0   # monotonic time of the last tmux client check
+
+    def injection_allowed():
+        nonlocal last_vt, vt_allowed, vt_checked
+        try:
+            with open(ACTIVE_VT_PATH) as f:
+                vt = f.read().strip()
+        except OSError:
+            return True  # no VT info: fall back to the -ctl gate alone
+        now = time.monotonic()
+        if vt != last_vt or now - vt_checked >= VT_CACHE_TTL:
+            last_vt = vt
+            vt_checked = now
+            vt_allowed = f"/dev/{vt}" in tmux_text_ttys()
+        return vt_allowed
+
     def tap(key):
+        if not injection_allowed():
+            return
         ui.write(ecodes.EV_KEY, key, 1)
         ui.syn()
         ui.write(ecodes.EV_KEY, key, 0)
