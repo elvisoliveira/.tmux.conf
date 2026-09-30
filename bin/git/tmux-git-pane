@@ -24,6 +24,10 @@ BIN="$(dirname "$(readlink -f "$0")")"
 cd "${GIT_ROOT:-.}"
 FIFO="${GIT_FIFO:-}"
 
+# fzf grabs the mouse by itself (independent of tmux's mouse option); the panel
+# is keyboard-driven, so disable it for every fzf below in one place.
+export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS:-} --no-mouse"
+
 FZF_NAV='J:down,K:up,H:first,L:last,ctrl-d:half-page-down,ctrl-u:half-page-up'
 FZF_KEEP='esc:ignore,enter:ignore,ctrl-c:ignore,ctrl-g:ignore,ctrl-q:ignore'
 
@@ -77,7 +81,7 @@ case "${1:-worktree}" in
     case "$1" in branches) refs=refs/heads ;; tags) refs=refs/tags ;; esac
     git for-each-ref --sort=-creatordate --color=always "$refs" \
         --format='%(align:20,left)%(refname:short)%(end) %(color:dim)%(objectname:short) %(committerdate:format:%Y-%m-%d)%(color:reset)' \
-      | fzf --ansi -i --reverse --no-mouse \
+      | fzf --ansi -i --reverse --no-mouse --prompt='filter: ' --info=inline \
             --bind "$FZF_NAV" --bind "$FZF_KEEP" \
             --bind "focus:execute-silent($BIN/tmux-git-push commit {1} $1)" \
             >/dev/null 2>&1 || true
