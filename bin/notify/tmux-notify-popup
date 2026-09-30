@@ -1,7 +1,7 @@
-#!/bin/sh
-# tmux-notify-popup — render ONE libnotify notification as an auto-closing toast
-# popup in tmux, colored by urgency. Reads a single tiramisu --json object on
-# stdin. Driven by tmux-notifyd; can also be tested by hand:
+#!/usr/bin/env bash
+# tmux-notify-popup — render ONE libnotify notification as an auto-closing
+# floating toast in tmux, colored by urgency. Reads a single tiramisu --json
+# object on stdin. Driven by tmux-notifyd; can also be tested by hand:
 #
 #   echo '{"source":"build","summary":"Done","body":"3 passed","hints":{"urgency":"0x02"}}' \
 #       | ~/.env/.tmux.conf/bin/notify/tmux-notify-popup
@@ -9,13 +9,8 @@
 # tmux options (set -g):
 #   @notify-popup-duration   seconds the toast stays up      (default 4)
 #
-# Preferred renderer is a floating pane (new-pane, tmux >= 3.7). With tmux >=
-# 3.8 it is opened with -A so it floats ABOVE a zoomed window without unzooming
-# it; older servers unzoom (3.7c) or would crash (3.7b), so there the toast falls
-# back to a modal display-popup. Popups grab the client's input while open, so
-# keep the duration short. Each popup is backgrounded because the CLI call
-# blocks until the popup closes.
-
+# The toast is a floating pane (new-pane, tmux >= 3.7): non-modal, never steals
+# the keyboard. With -A (tmux >= 3.8) it floats above a zoomed window too.
 set -u
 
 DUR=$(tmux show-option -gqv @notify-popup-duration 2>/dev/null)
@@ -23,111 +18,59 @@ case "$DUR" in ''|*[!0-9]*) DUR=4 ;; esac
 
 RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
-# Read the notification JSON from stdin, then parse it into safely-quoted shell
-# assignments. python gets its program via -c (NOT `python3 - <<HEREDOC`, which
-# would hijack stdin and starve json.load of the actual notification).
-json=$(cat)
-vars=$(printf '%s' "$json" | python3 -c '
-import json, sys, shlex
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(1)
-src  = (d.get("source")  or "").strip()
-summ = (d.get("summary") or "").strip()
-body = (d.get("body")    or "").strip()
-urg  = str((d.get("hints") or {}).get("urgency", "")).strip()
-if not (summ or body):
-    sys.exit(1)
-maxlen = max(len(summ), len(body), len(src) + 6)
-nlines = 1 + (1 if body else 0)
-out = {"SRC": src, "SUMM": summ, "BODY": body, "URG": urg,
-       "MAXLEN": str(maxlen), "NLINES": str(nlines)}
-for k, v in out.items():
-    print("%s=%s" % (k, shlex.quote(v)))
-') || exit 0
-eval "$vars"
+# Parse the notification: four trimmed fields, NUL-separated (a body may span
+# lines), straight into variables. Nothing is eval'd.
+{ IFS= read -r -d '' SRC; IFS= read -r -d '' SUMM; IFS= read -r -d '' BODY; IFS= read -r -d '' URG; } < <(
+    jq -j '[.source, .summary, .body, (.hints.urgency // "" | tostring)]
+           | map((. // "") | tostring | gsub("^\\s+|\\s+$"; "") | gsub("\u0000"; ""))
+           | join("\u0000") + "\u0000"' 2>/dev/null
+)
+[ -n "$SUMM$BODY" ] || exit 0
 
-# Color by urgency (0x02 = critical -> red, otherwise normal -> blue).
-# bstyle:  popup border (fg+bg fill). pbstyle: floating-pane border (fg only).
+# Border color by urgency (0x02 = critical -> red, otherwise -> blue).
 case "$URG" in
-    0x02|2) bstyle="fg=colour231,bg=colour160"; pbstyle="fg=colour160" ;;   # critical: red
-    *)      bstyle="fg=colour231,bg=colour24";  pbstyle="fg=colour39"  ;;   # normal: blue
+    0x02|2) bstyle="fg=colour160" ;;
+    *)      bstyle="fg=colour39"  ;;
 esac
 
-# Title (border) = the notification SUMMARY, i.e. the notify-send title — this
-# is what `notify-send "<title>" "<body>"` puts first. The app name is prefixed
-# only when it is set and not libnotify's generic "notify-send" default.
+# Title (border) = the notification SUMMARY, i.e. the notify-send title. The app
+# name is prefixed only when set and not libnotify's generic "notify-send".
 case "$SRC" in
     ''|notify-send) title=" 🔔 $SUMM " ;;
     *)              title=" 🔔 $SRC · $SUMM " ;;
 esac
 
-# Body area = the body, written WITHOUT a trailing newline so a short pane does
-# not scroll it out of view. A single space keeps the pane valid when empty.
+# Body goes through a temp file (it may hold newlines/quotes), written WITHOUT
+# a trailing newline so a short pane does not scroll it out of view.
 tmpf="$RUNTIME/tmux-notify.$$"
-if [ -n "$BODY" ]; then printf '%s' "$BODY" > "$tmpf"; else printf ' ' > "$tmpf"; fi
+printf '%s' "${BODY:- }" > "$tmpf"
 blines=$(awk 'END{print NR}' "$tmpf"); [ "${blines:-0}" -lt 1 ] && blines=1
 
 # Geometry, clamped. Width tracks the wider of title and body; +6 pads borders
-# and wide glyphs (🔔, ·). Height = body lines + 2: both a floating pane and a
-# popup reserve exactly two rows of chrome, so +2 leaves no trailing blank row.
+# and wide glyphs. Height = body lines + 2 rows of chrome.
 maxc=${#title}; [ "${#BODY}" -gt "$maxc" ] && maxc=${#BODY}
 w=$((maxc + 6)); [ "$w" -lt 24 ] && w=24; [ "$w" -gt 64 ] && w=64
 h=$((blines + 2))
 
-# Render on EVERY live tmux server that has an attached client — auto-discovered
-# by scanning the socket dir. A daemon has no $TMUX, so we can't assume the
-# default socket; the user may be on 'next', 'default', or any custom socket.
-# Capability is probed per socket (servers may differ in version), preferring a
-# FLOATING PANE (tmux >= 3.7, non-modal — never steals the keyboard) and falling
-# back to a modal popup on older servers.
-# --- toast renderers (use the geometry/style computed above) ----------------
-# Floating, non-modal, top-right, auto-closing. For new-pane, -x/-y are the SIZE
-# and -X/-Y the position (opposite of display-popup). $above is "-A" when the
-# server supports staying above a zoomed window (tmux >= 3.8), else empty.
-_float() {  # $1=sock  $2=target-window  $3=window-width
-    _fx=$(( ${3:-80} - w - 1 )); [ "$_fx" -lt 0 ] && _fx=0
-    tmux -S "$1" new-pane $above -d -t "$2" -x "$w" -y "$h" -X "$_fx" -Y 1 \
-        -S "$pbstyle" -R "$pbstyle" -T "$title" "cat '$tmpf'; sleep $DUR" >/dev/null 2>&1
-}
-# Modal popup — crash-safe. -k: any key dismisses it, so it yields to your typing
-# after at most one swallowed keystroke.
-_popup() {  # $1=sock  $2=client
-    tmux -S "$1" display-popup -E -k -c "$2" -b rounded -S "$bstyle" -T "$title" \
-        -w "$w" -h "$h" -x R -y 1 "cat '$tmpf'; sleep $DUR" >/dev/null 2>&1 &
-}
-
+# Render on EVERY live tmux server with an attached client, discovered by
+# scanning the socket dir (a daemon has no $TMUX). One toast per client window,
+# top-right. For new-pane, -x/-y are the SIZE and -X/-Y the POSITION.
 SOCKDIR="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)"
-TAB=$(printf '\t')
+TAB=$'\t'
 for sock in "$SOCKDIR"/*; do
     [ -S "$sock" ] || continue
-    # Live server with at least one attached client?
-    [ -n "$(tmux -S "$sock" list-clients 2>/dev/null)" ] || continue
-
-    # Does this server support floating panes, and are they allowed?
-    # `set -g @notify-force-popup on` forces the stable modal popup everywhere.
-    # Floating panes need new-pane (>= 3.7); -A (>= 3.8, "above zoom") keeps a
-    # zoomed window zoomed while the toast floats over it. Without -A a 3.7 server
-    # unzooms on open (3.7c) or crashes (3.7b), so only float when -A is there.
-    supports_float=no above=
-    force_popup=$(tmux -S "$sock" show-option -gqv @notify-force-popup 2>/dev/null)
-    usage=$(tmux -S "$sock" list-commands new-pane 2>/dev/null)
-    case "$force_popup:$usage" in
-        on:*)                 ;;
-        *':new-pane '*'[-A'*) supports_float=yes above=-A ;;
-    esac
+    # -A (>= 3.8) keeps a zoomed window zoomed under the toast; without it the
+    # float still works but unzooms. Probe per server, they may differ.
+    above=; tmux -S "$sock" list-commands new-pane 2>/dev/null | grep -q '\[-A' && above=-A
     tmux -S "$sock" list-clients \
-        -F "#{client_name}${TAB}#{session_name}:#{window_index}${TAB}#{window_width}" 2>/dev/null \
-    | while IFS="$TAB" read -r cname tgt ww; do
-        [ -n "$cname" ] || continue
-        if [ "$supports_float" = yes ]; then
-            _float "$sock" "$tgt" "$ww"
-        else
-            _popup "$sock" "$cname"
-        fi
+        -F "#{session_name}:#{window_index}${TAB}#{window_width}" 2>/dev/null \
+    | while IFS="$TAB" read -r tgt ww; do
+        [ -n "$tgt" ] || continue
+        x=$(( ${ww:-80} - w - 1 )); [ "$x" -lt 0 ] && x=0
+        tmux -S "$sock" new-pane $above -d -t "$tgt" -x "$w" -y "$h" -X "$x" -Y 1 \
+            -S "$bstyle" -R "$bstyle" -T "$title" "cat '$tmpf'; sleep $DUR" >/dev/null 2>&1
     done
 done
 
-# Remove the temp file once the longest-lived popup has closed.
+# Remove the temp file once the toast has closed.
 ( sleep $((DUR + 1)); rm -f "$tmpf" ) >/dev/null 2>&1 &

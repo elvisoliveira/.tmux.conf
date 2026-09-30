@@ -12,7 +12,7 @@ libnotify pops up inside tmux.
 - `tmux-notify-popup` — renders ONE notification as an auto-closing toast,
   colored by urgency, on every attached client. Preferred renderer is a
   floating pane via `new-pane -A` (tmux >= 3.8: floats above a zoomed window
-  and keeps the zoom); older servers fall back to a modal `display-popup`.
+  and keeps the zoom). Requires tmux >= 3.8.
 - `pane-notify` — bound to `prefix M`: toggles `pipe-pane` on the current pane
   and fires a notification whenever it produces new output, throttled to one
   per cooldown. Useful to get pinged when a long command finishes.
@@ -22,7 +22,6 @@ libnotify pops up inside tmux.
 Options (`set -g` in `.tmux.conf`):
 
 ```
-@notify-force-popup on   # force the modal popup everywhere
 @notify-popup-duration 4 # seconds a toast stays up
 ```
 
