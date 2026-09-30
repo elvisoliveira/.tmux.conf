@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+# Print the CPU package temperature (e.g. "60°C").
+# Silent when no sensor is available (VMs, WSL).
+
+set -uo pipefail
+
+# Linux: prefer x86_pkg_temp, fall back to the first CPU-ish thermal zone
+for z in /sys/class/thermal/thermal_zone*; do
+  [ -r "$z/type" ] && [ -r "$z/temp" ] || continue
+  case "$(cat "$z/type")" in
+    x86_pkg_temp|TCPU|cpu-thermal|coretemp*)
+      printf '%d°C\n' "$(( $(cat "$z/temp") / 1000 ))"
+      exit 0
+      ;;
+  esac
+done
+
+exit 0
