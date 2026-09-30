@@ -5,7 +5,17 @@
 # Reads key by key so Esc cancels at once: tmux only closes a popup on Esc when
 # no command is running in it, so a plain `read` would swallow the Escape.
 D=$1
-printf '\033[1mAuthorizing execution of:\033[0m\n\n    %s\n\n' "$(cat "$D/cmd")"
+# Show the whole command, wrapped to the popup width, capped at 12 lines. If it
+# is longer, say so loudly: never let a long command scroll its tail off screen.
+cols=$(tput cols 2>/dev/null || echo 80)
+wrapped=$(fold -s -w $((cols - 6)) < "$D/cmd")
+total=$(printf '%s\n' "$wrapped" | wc -l)
+printf '\033[1mAuthorizing execution of:\033[0m\n\n'
+printf '%s\n' "$wrapped" | head -n 12 | sed 's/^/    /'
+if [ "$total" -gt 12 ]; then
+    printf '\033[1;31m    [... %d more line(s) NOT shown: command truncated]\033[0m\n' $((total - 12))
+fi
+printf '\n'
 if [ -s "$D/reason" ]; then
     printf '\033[2mJustification (self-declared by the agent, not verified):\033[0m\n'
     sed 's/^/    /' "$D/reason"

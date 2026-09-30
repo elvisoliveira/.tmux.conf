@@ -31,7 +31,7 @@ if [ -n "$client" ]; then
     # run the popup in the foreground: display-popup -E returns only when the
     # popup closes (answer or Esc), so no polling is needed.
     exec 3<>"$D/pass"
-    tmux display-popup -c "$client" -T ' sudo ' -w 80% -h 40% -E "'$BIN/askpass-prompt' '$D'" 2>/dev/null
+    tmux display-popup -c "$client" -T ' sudo ' -w 80% -h 60% -E "'$BIN/askpass-prompt' '$D'" 2>/dev/null
     pass=
     IFS= read -r -t 1 -u 3 pass
     if [ -z "$pass" ]; then
