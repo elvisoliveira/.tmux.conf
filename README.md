@@ -20,7 +20,7 @@ own README.
 - [`bin/notify/`](bin/notify/README.md) — notify-send → tmux toast bridge.
 - [`bin/git/`](bin/git/README.md) — read-only git dashboard in a floating pane
   (`Ctrl+G`).
-- [`bin/sudo/`](bin/sudo/README.md) — `SUDO_ASKPASS` helpers for sudo without a
+- [`bin/askpass/`](bin/askpass/README.md) — `SUDO_ASKPASS` helpers for sudo without a
   tty (tmux popup, or a resident agent in a terminal).
 - [`bin/tmb118/`](bin/tmb118/README.md) — bits specific to this laptop (Acer
   TravelMate Spin B118): TTY font size, backlight, touchscreen scroll, keyboard

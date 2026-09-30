@@ -1,4 +1,4 @@
-# sudo — password prompts without a tty
+# askpass — sudo password prompts without a tty
 
 Claude Code runs under a detached tmux server outside any elogind session, so
 interactive `sudo` has no tty and polkit has no agent to route to. These are
@@ -19,7 +19,7 @@ interactive `sudo` has no tty and polkit has no agent to route to. These are
   agent.
 
 ```sh
-SUDO_ASKPASS=~/.env/.tmux.conf/bin/sudo/askpass-tmux sudo -A <command>
+SUDO_ASKPASS=~/.env/.tmux.conf/bin/askpass/askpass-tmux sudo -A <command>
 ```
 
 The password never goes through the caller: it travels fifo → `sudo`.
