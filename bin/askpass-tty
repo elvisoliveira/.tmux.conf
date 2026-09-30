@@ -1,0 +1,19 @@
+#!/bin/sh
+# SUDO_ASKPASS helper: envia ao sudo-tty-agent o comando real do sudo (lido de
+# /proc do processo pai, que E o proprio sudo) e a justificativa autodeclarada
+# do agente (se houver em $XDG_RUNTIME_DIR/sudo-reason), e devolve a senha.
+RT=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+D=$RT/sudo-tty-agent
+[ -p "$D/req" ] || { echo "sudo-tty-agent nao esta rodando" >&2; exit 1; }
+CMD=$(tr '\0' ' ' < /proc/$PPID/cmdline 2>/dev/null | tr -d '\n')
+# Justificativa: consumo unico, ignorada se tiver mais de 60s. NAO verificada.
+REASON=
+if [ -f "$RT/sudo-reason" ]; then
+    mt=$(stat -c %Y "$RT/sudo-reason" 2>/dev/null || echo 0)
+    [ $(( $(date +%s) - mt )) -le 60 ] && REASON=$(head -c 600 "$RT/sudo-reason" | tr '\n' ' ')
+    rm -f "$RT/sudo-reason"
+fi
+# Protocolo: linha 1 = comando, linha 2 = justificativa (uma linha, pode vazia)
+printf '%s\n%s\n' "${CMD:-comando desconhecido}" "$REASON" > "$D/req"
+IFS= read -r pass < "$D/resp"
+printf '%s' "$pass"

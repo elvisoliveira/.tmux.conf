@@ -10,7 +10,7 @@
 # Injected by the keybinding: TMUX_GIT_DIR = the active pane's directory.
 set -euo pipefail
 
-BIN="$HOME/.env/.tmux.conf/bin"
+BIN="$(dirname "$(readlink -f "$0")")"
 
 cd "${TMUX_GIT_DIR:-$PWD}" 2>/dev/null || true
 

@@ -5,12 +5,25 @@ My tmux setup.
 ln -s (pwd)/.tmux.conf ~/.tmux.conf
 ```
 
+## Layout
+
+- `bin/` — generic tmux helpers: status-bar segments, `tmux-swap-pane`,
+  `claude-resume-restore`, and the `askpass-*` / `sudo-tty-agent` sudo helpers.
+- `bin/notify/` — notify-send → tmux toast bridge (`tmux-notifyd`,
+  `tmux-notify-popup`, `pane-notify`).
+- `bin/git/` — the floating git dashboard (`tmux-git-*`, prefix-less `C-g`).
+- `bin/tmb118/` — bits specific to this laptop (Acer TravelMate Spin B118):
+  TTY font size, backlight, touchscreen scroll, keyboard layout toggle.
+
+Scripts are called by absolute path from `.tmux.conf` and find their siblings
+via `dirname "$0"`, so nothing here needs to be on `PATH`.
+
 ## Touch scroll on the TTY
 
 On a raw TTY (kernel 5.10+ removed the fbcon scrollback, so `Shift+PgUp`
-does nothing), `bin/touch-scroll-daemon` reads the touchscreen via evdev and
+does nothing), `bin/tmb118/touch-scroll-daemon` reads the touchscreen via evdev and
 turns a vertical drag into `PageUp`/`PageDown`, injected through a virtual
-uinput keyboard. `bin/touch-scroll-ctl` (wired to the `client-attached` /
+uinput keyboard. `bin/tmb118/touch-scroll-ctl` (wired to the `client-attached` /
 `client-detached` hooks) only starts it while a tmux client is on a real VT
 (`/dev/ttyN`); under a graphical terminal (`/dev/pts/*`) the compositor already
 handles touch, so the daemon stays off to avoid double scrolling.
@@ -44,12 +57,12 @@ id | grep -o input              # must list `input` before the daemon can run
 pgrep -af touch-scroll-daemon   # empty = off; with a PID = running
 ```
 
-Knobs live at the top of `bin/touch-scroll-daemon`: `SCROLL_FRACTION`
+Knobs live at the top of `bin/tmb118/touch-scroll-daemon`: `SCROLL_FRACTION`
 (sensitivity), `NATURAL` (drag direction), `TAP_DEADZONE` (tap vs. drag).
 
 ## Backlight off (`tela-off`)
 
-`bin/tela-off` turns off the screen backlight until any key is pressed
+`bin/tmb118/tela-off` turns off the screen backlight until any key is pressed
 (chord `Ctrl+G`). It's hardware-level — it writes to the backlight `brightness`
 sysfs node, so it does not touch the framebuffer, WiFi, or running processes;
 background work keeps going. The bind opens it in a throwaway window so its
@@ -74,7 +87,7 @@ sessions.
 
 ## TTY font size (`font-size`)
 
-`bin/font-size up|down` cycles terminus-font sizes on the raw TTY
+`bin/tmb118/font-size up|down` cycles terminus-font sizes on the raw TTY
 (`Alt+=` / `Alt+-`). It's a silent no-op on a graphical terminal — it keys off
 the real terminal name, which tmux passes in via `TMUX_TERM` since `run-shell`
 does not inherit the pane's `TERM`. State persists in `~/.cache/tty-font-size`.
@@ -94,5 +107,25 @@ sudo chmod 0440 /etc/sudoers.d/zz-setfont-nopasswd
 sudo visudo -c -f /etc/sudoers.d/zz-setfont-nopasswd   # validate syntax
 ```
 
-`~/permitir-setfont.sh` automates exactly this. `bin/font-size` invokes
+`~/permitir-setfont.sh` automates exactly this. `bin/tmb118/font-size` invokes
 `sudo -n setfont -C /dev/ttyN ter-vNNn`, which matches the rule above.
+
+## Sudo without a tty (`askpass-tmux`, `sudo-tty-agent`)
+
+Claude Code runs under a detached tmux server outside any elogind session, so
+interactive `sudo` has no tty and polkit has no agent to route to.
+`bin/askpass-tmux` is a `SUDO_ASKPASS` helper: it opens a `display-popup` on
+the most recently active tmux client showing the exact command (read from
+`/proc` of the calling `sudo`) plus an optional self-declared justification
+left in `$XDG_RUNTIME_DIR/sudo-reason` (consumed once, ignored if older than
+60s, never verified), and hands the password to `sudo` over a 0600 fifo in
+tmpfs. Esc cancels.
+
+```sh
+SUDO_ASKPASS=~/.env/.tmux.conf/bin/askpass-tmux sudo -A <command>
+```
+
+With no tmux client attached it falls back to `bin/sudo-tty-agent`: run that
+in any terminal and leave it in the foreground; each request prints the
+command there and prompts for the password. `bin/askpass-tty` is the plain
+`SUDO_ASKPASS` counterpart that talks only to the agent.

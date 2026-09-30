@@ -19,7 +19,7 @@
 set -uo pipefail
 
 root="${GIT_ROOT:?GIT_ROOT not set}"
-BIN="$HOME/.env/.tmux.conf/bin"
+BIN="$(dirname "$(readlink -f "$0")")"
 conf="$BIN/tmux-git.tmux.conf"
 sock="tmux-git.$$"
 

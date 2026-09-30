@@ -4,7 +4,7 @@
 # stdin. Driven by tmux-notifyd; can also be tested by hand:
 #
 #   echo '{"source":"build","summary":"Done","body":"3 passed","hints":{"urgency":"0x02"}}' \
-#       | ~/.env/.tmux.conf/bin/tmux-notify-popup
+#       | ~/.env/.tmux.conf/bin/notify/tmux-notify-popup
 #
 # tmux options (set -g):
 #   @notify-popup-duration   seconds the toast stays up      (default 4)
