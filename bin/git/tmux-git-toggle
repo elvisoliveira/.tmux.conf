@@ -19,7 +19,7 @@ socks=( "$tdir"/tmux-git.* )
 # just removed, NOT treated as an open float — otherwise it would wedge the toggle,
 # failing the kill and never reopening. Open a float only if none were live.
 closed=0
-for s in "${socks[@]}"; do
+for s in ${socks[@]+"${socks[@]}"}; do  # bash 3.2: "${a[@]}" on an empty array is unbound under set -u
   if [ -S "$s" ] && tmux -S "$s" kill-server 2>/dev/null; then
     closed=1
   else

@@ -138,10 +138,13 @@ case "${1:-worktree}" in
     # $FIFO.cur state file (written atomically by tmux-git-push). Rendering only
     # the newest state skips the backlog when navigation outruns delta, and a
     # lost/coalesced poke self-heals on the next 0.5s poll.
+    # bash 3.2 (macOS) rejects a fractional -t outright, so the read would fail
+    # instantly and spin; poll every 1s there and skip the drain.
+    poll=0.5; [ "${BASH_VERSINFO[0]}" -ge 4 ] || poll=1
     last=''
     while :; do
-      IFS= read -t 0.5 -r _ <&3
-      while IFS= read -t 0.01 -r _ <&3; do :; done   # drain extra pokes
+      IFS= read -t $poll -r _ <&3
+      [ $poll = 1 ] || while IFS= read -t 0.01 -r _ <&3; do :; done   # drain extra pokes
       cur=$(cat "$FIFO.cur" 2>/dev/null)
       if [ -n "$cur" ] && [ "$cur" != "$last" ]; then
         last=$cur; typ=${cur%%$'\t'*}; arg=${cur#*$'\t'}

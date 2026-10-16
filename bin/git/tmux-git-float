@@ -19,6 +19,18 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 0
 fi
 
+# Every git pane shells out to fzf and pipes through delta. Check here, at the one
+# entrypoint, rather than in each pane: a missing binary there fails inside the
+# nested server, where the pane just dies and the float closes with no visible cause.
+missing=
+for t in fzf delta; do
+  command -v "$t" >/dev/null 2>&1 || missing="${missing:+$missing }$t"
+done
+if [ -n "$missing" ]; then
+  tmux display-message "tmux-git: missing: $missing"
+  exit 0
+fi
+
 root=$(git rev-parse --show-toplevel)
 
 # Geometry: float centered at 85% of the window. In new-pane, -x/-y are the SIZE
