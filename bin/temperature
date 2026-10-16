@@ -16,4 +16,10 @@ for z in /sys/class/thermal/thermal_zone*; do
   esac
 done
 
+# macOS (Apple Silicon): macmon reads the SoC sensors without sudo.
+if command -v macmon >/dev/null 2>&1; then
+  t="$(macmon pipe -s 1 -i 200 2>/dev/null | jq -r '.temp.cpu_temp_avg // empty' 2>/dev/null)"
+  [ -n "$t" ] && printf '%.0f°C\n' "$t"
+fi
+
 exit 0
