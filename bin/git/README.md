@@ -13,5 +13,5 @@ its in-float side, which lifts the outer lock on exit).
 Install gitsmart into `~/.local/bin` (needs `cargo`):
 
 ```
-CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install --root ~/.local --git ssh://git@github.com/elvisoliveira/gitsmart
+cargo install --root ~/.local --git https://github.com/elvisoliveira/gitsmart
 ```
