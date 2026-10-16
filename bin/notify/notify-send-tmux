@@ -1,0 +1,25 @@
+#!/bin/sh
+# notify-send-tmux — notify-send stand-in for hosts without D-Bus/tiramisu
+# (macOS). Skips the bus and feeds the toast presenter directly. Install it as
+# `notify-send` on PATH on such hosts only:
+#
+#   ln -s ~/.env/.tmux.conf/bin/notify/notify-send-tmux ~/.local/bin/notify-send
+#
+# Accepts the notify-send flags the scripts here use; -u sets the urgency, the
+# rest (-r, -t, -i, -h, ...) are parsed and ignored.
+set -u
+
+app=notify-send urg=normal
+while getopts a:u:r:t:i:h:c:A:ep opt; do
+    case "$opt" in
+        a) app=$OPTARG ;;
+        u) urg=$OPTARG ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+case "$urg" in low) urg=0x00 ;; critical) urg=0x02 ;; *) urg=0x01 ;; esac
+
+jq -nc --arg s "$app" --arg t "${1:-}" --arg b "${2:-}" --arg u "$urg" \
+    '{source:$s, summary:$t, body:$b, hints:{urgency:$u}}' \
+| "$(dirname "$(readlink -f "$0")")/tmux-notify-popup"

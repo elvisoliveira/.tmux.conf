@@ -2,7 +2,9 @@
 # Password agent for sudo -A: run it in a terminal of yours and leave it in the
 # foreground. When Claude runs sudo, the exact command and the password prompt
 # show up HERE; the password goes to sudo over a FIFO (0600), never through Claude.
-D=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/sudo-tty-agent
+RT=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+[ -d "$RT" ] || RT=${TMPDIR:-/tmp}  # macOS: no /run/user
+D=$RT/sudo-tty-agent
 mkdir -p -m700 "$D"
 rm -f "$D/req" "$D/resp"
 mkfifo -m600 "$D/req" "$D/resp"

@@ -6,14 +6,16 @@
 set -u
 BIN=$(dirname "$(readlink -f "$0")")
 CMD=$(tr '\0' ' ' < /proc/$PPID/cmdline 2>/dev/null | tr -d '\n')
+[ -n "$CMD" ] || CMD=$(ps -o args= -p "$PPID")  # macOS: no /proc
 RT=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+[ -d "$RT" ] || RT=${TMPDIR:-/tmp}  # macOS: no /run/user
 
 # Justification self-declared by the agent in $RT/sudo-reason (consumed once;
 # ignored if older than 60s, so a leftover from an old invocation is never shown).
 # NOT verified — the authoritative line is always the command read from /proc.
 REASON=
 if [ -f "$RT/sudo-reason" ]; then
-    mt=$(stat -c %Y "$RT/sudo-reason" 2>/dev/null || echo 0)
+    mt=$(stat -c %Y "$RT/sudo-reason" 2>/dev/null || stat -f %m "$RT/sudo-reason" 2>/dev/null || echo 0)
     [ $(( $(date +%s) - mt )) -le 60 ] && REASON=$(head -c 600 "$RT/sudo-reason" | head -n 8)
     rm -f "$RT/sudo-reason"
 fi

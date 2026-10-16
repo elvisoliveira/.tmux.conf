@@ -17,6 +17,7 @@ DUR=$(tmux show-option -gqv @notify-popup-duration 2>/dev/null)
 case "$DUR" in ''|*[!0-9]*) DUR=4 ;; esac
 
 RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+[ -d "$RUNTIME" ] || RUNTIME="${TMPDIR:-/tmp}"  # macOS: no /run/user
 
 # Parse the notification: four trimmed fields, NUL-separated (a body may span
 # lines), straight into variables. Nothing is eval'd.
