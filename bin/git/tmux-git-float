@@ -1,14 +1,55 @@
 #!/usr/bin/env bash
-# tmux-git-float — floating-pane variant (like the tmux-notify toast).
+# tmux-git-float — C-g: the read-only git dashboard gitsmart
+# (github.com/elvisoliveira/gitsmart) in a floating pane.
 #
-# Orchestrator. Runs under `run-shell` (no TTY): it only computes the geometry
-# and creates the floating pane with `new-pane` (same primitive as
-# tmux-notify-popup). A float can't be split, so the multi-pane dashboard lives
-# in a NESTED tmux launched inside the float (see tmux-git-nested).
-#
+#   tmux-git-float        from the binding, under run-shell (no TTY): computes the
+#                         geometry, auto-locks the outer tmux, creates the float
+#   tmux-git-float --run  inside the float: runs the dashboard, and on any exit —
+#                         including SIGHUP when the float is closed from outside —
+#                         lifts the outer auto-lock
+#   tmux-git-float --zoom C-z (bound in .tmux.conf): toggles the focused float
+#                         between 85% of the window and fullscreen
 #
 # Injected by the keybinding: TMUX_GIT_DIR = the active pane's directory.
 set -euo pipefail
+
+if [ "${1:-}" = --run ]; then
+  set +e
+  # Undo the outer auto-lock, but only if the float turned it on (a manual lock
+  # that predated the float keeps its state). The flag holds the locked session's
+  # name; -u reverts each option to its global default. Mirrors the C-Space unlock.
+  unlock() {
+    [ -n "${TMUX_OUTER:-}" ] || return 0
+    osock="${TMUX_OUTER%%,*}"
+    lsess=$(tmux -S "$osock" show -gv @git-autolock 2>/dev/null)
+    [ -n "$lsess" ] || return 0
+    tmux -S "$osock" set -t "$lsess" -u prefix \; set -t "$lsess" -u key-table \; \
+      set -t "$lsess" -u status-style \; set -gu @git-autolock \; refresh-client -S
+  }
+  trap unlock EXIT HUP TERM INT
+  "$HOME/.local/bin/gitsmart"
+  exit
+fi
+
+# Float size: 85% of the window, centered.
+geometry() {
+  read -r ww wh < <(tmux display -p '#{window_width} #{window_height}')
+  w=$(( ww * 85 / 100 ))
+  h=$(( wh * 85 / 100 ))
+  x=$(( (ww - w) / 2 ))
+  y=$(( (wh - h) / 2 ))
+}
+
+if [ "${1:-}" = --zoom ]; then
+  if [ "$(tmux show -pv @git-big 2>/dev/null)" = 1 ]; then
+    geometry
+    tmux resize-pane -x "$w" -y "$h" \; set -pu @git-big
+  else
+    tmux resize-pane -x 100% -y 100% \; set -p @git-big 1
+  fi
+  tmux move-pane -P center
+  exit
+fi
 
 BIN="$(dirname "$(readlink -f "$0")")"
 
@@ -19,15 +60,8 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 0
 fi
 
-# Every git pane shells out to fzf and pipes through delta. Check here, at the one
-# entrypoint, rather than in each pane: a missing binary there fails inside the
-# nested server, where the pane just dies and the float closes with no visible cause.
-missing=
-for t in fzf delta; do
-  command -v "$t" >/dev/null 2>&1 || missing="${missing:+$missing }$t"
-done
-if [ -n "$missing" ]; then
-  tmux display-message "tmux-git: missing: $missing"
+if [ ! -x "$HOME/.local/bin/gitsmart" ]; then
+  tmux display-message "gitsmart not installed — see ~/.env/.tmux.conf/bin/git/README.md"
   exit 0
 fi
 
@@ -35,16 +69,13 @@ root=$(git rev-parse --show-toplevel)
 
 # Geometry: float centered at 85% of the window. In new-pane, -x/-y are the SIZE
 # and -X/-Y the POSITION (the opposite of display-popup).
-read -r ww wh win < <(tmux display -p '#{window_width} #{window_height} #{session_name}:#{window_index}')
-w=$(( ww * 85 / 100 ))
-h=$(( wh * 85 / 100 ))
-x=$(( (ww - w) / 2 ))
-y=$(( (wh - h) / 2 ))
+geometry
+win=$(tmux display -p '#{session_name}:#{window_index}')
 
 # Auto-lock the OUTER tmux while the float is open, mirroring its C-Space lock:
-# prefix -> None so a C-b passes through to the float and drives the git panes
-# (prefix2). Target the session explicitly (-t) and stash its name in a global
-# flag so the nested cleanup can unlock exactly this session — and only if WE
+# prefix -> None and key-table off, so C-b / C-w / C-g reach the dashboard.
+# Target the session explicitly (-t) and stash its name in a global flag so
+# --run can unlock exactly this session — and only if WE
 # locked it (a pre-existing manual lock is left as it was).
 if [ "$(tmux show -gv key-table 2>/dev/null)" != off ]; then
   sess=$(tmux display -p '#{session_name}')
@@ -55,9 +86,8 @@ if [ "$(tmux show -gv key-table 2>/dev/null)" != off ]; then
       refresh-client -S
 fi
 
-# TMUX_OUTER lets the nested C-z (tmux-git-zoom) grow THIS float — a pane in the
-# outer server — when zooming. It's the outer's socket,pid,session triple.
+# TMUX_OUTER lets --run lift the lock. It's the outer's socket,pid,session triple.
 tmux new-pane -t "$win" -c "$root" -e GIT_ROOT="$root" -e TMUX_OUTER="$TMUX" \
   -B heavy -T ' git ' \
   -x "$w" -y "$h" -X "$x" -Y "$y" \
-  "$BIN/tmux-git-nested"
+  "$BIN/tmux-git-float" --run
