@@ -27,8 +27,8 @@ while IFS= read -rs -n1 c; do
     case $c in
         $'\e')          exit 1 ;;            # Esc: nothing written -> cancel
         ''|$'\n')       break ;;             # Enter
-        $'\x7f'|$'\b')  p=${p%?} ;;          # Backspace
-        *)              p+=$c ;;
+        $'\x7f'|$'\b')  [ -n "$p" ] && printf '\b \b'; p=${p%?} ;;  # Backspace
+        *)              p+=$c; printf '*' ;; # mask feedback, like sudo pwfeedback
     esac
 done
 printf '\n'
