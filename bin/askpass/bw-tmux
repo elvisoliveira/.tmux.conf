@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# bw-tmux: one-shot Bitwarden CLI for callers without a tty (agents, scripts).
+# Asks for the master password in a tmux popup, unlocks, runs the single bw
+# command, and always locks the vault again. Self-contained: independent from
+# askpass-tmux/askpass-prompt (sudo) and from the bw fish function (terminal).
+#   bw-tmux <bw subcommand> [args...]      e.g.  bw-tmux get password github
+#   BW_REASON='why' bw-tmux ...            optional one-line justification shown in the popup
+#   stdin is passed to the bw command only (e.g. `bw encode | bw-tmux create item`)
+# The master password goes popup -> 0600 fifo in tmpfs -> env of `bw unlock` only.
+set -u
+SELF=$(readlink -f "$0")
+
+# --- popup side: runs INSIDE display-popup; $2 is the request dir ----------
+if [ "${1:-}" = "--prompt" ]; then
+    D=$2
+    cols=$(tput cols 2>/dev/null || echo 80)
+    wrapped=$(fold -s -w $((cols - 6)) < "$D/cmd")
+    total=$(printf '%s\n' "$wrapped" | wc -l)
+    printf '\033[1mBitwarden: unlock the vault for ONE command:\033[0m\n\n'
+    printf '%s\n' "$wrapped" | head -n 12 | sed 's/^/    /'
+    [ "$total" -gt 12 ] && printf '\033[1;31m    [... %d more line(s) NOT shown]\033[0m\n' $((total - 12))
+    printf '\n\033[2m    (declared by the caller, not verified)\033[0m\n\n'
+    if [ -s "$D/reason" ]; then
+        printf '\033[2mJustification (self-declared, not verified):\033[0m\n'
+        sed 's/^/    /' "$D/reason"
+        printf '\n'
+    fi
+    printf 'Master password (Esc cancels): '
+    p=
+    # key by key, so Esc cancels at once (see askpass-prompt)
+    while IFS= read -rs -n1 c; do
+        case $c in
+            $'\e')          exit 1 ;;
+            ''|$'\n')       break ;;
+            $'\x7f'|$'\b')  [ -n "$p" ] && printf '\b \b'; p=${p%?} ;;
+            *)              p+=$c; printf '*' ;;
+        esac
+    done
+    printf '\n'
+    printf '%s\n' "$p" > "$D/pass"
+    exit 0
+fi
+
+# --- caller side --------------------------------------------------------------
+[ $# -gt 0 ] || { echo "usage: bw-tmux <bw subcommand> [args...]" >&2; exit 2; }
+BW=$(command -v bw) || { echo "bw-tmux: bitwarden-cli (bw) not installed" >&2; exit 1; }
+
+# Commands that do not need the vault unlocked: no popup.
+case $1 in
+    status|login|logout|config|lock|--version|-v|--help|-h|help) exec "$BW" "$@" ;;
+    unlock) echo "bw-tmux: one-shot only, 'unlock' is not allowed" >&2; exit 2 ;;
+esac
+
+RT=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null \
+         | sort -rn | awk 'NR==1{print $2}')
+[ -n "$client" ] || { echo "bw-tmux: no tmux client attached (use the bw fish function in a terminal)" >&2; exit 1; }
+
+D=$(mktemp -d "$RT/bw-ask.XXXXXX") || exit 1
+SESSION=
+cleanup() {
+    [ -n "$SESSION" ] && BW_SESSION=$SESSION "$BW" lock </dev/null >/dev/null 2>&1
+    rm -rf "$D"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+mkfifo -m600 "$D/pass" || exit 1
+printf 'bw %s' "$(printf '%q ' "$@")" > "$D/cmd"
+
+# Piped data (e.g. `bw encode | bw-tmux create item`) is part of the request too:
+# keep it in the 0700 request dir and describe it in the popup, never its values.
+HAS_STDIN=
+if [ ! -t 0 ]; then
+    cat > "$D/stdin"
+    HAS_STDIN=1
+    {
+        printf '\n  + stdin: %s bytes' "$(wc -c < "$D/stdin")"
+        if command -v jq >/dev/null \
+           && json=$(base64 -d < "$D/stdin" 2>/dev/null || cat "$D/stdin") \
+           && printf '%s' "$json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            printf '%s' "$json" | jq -r '
+                ({"1":"login","2":"secure note","3":"card","4":"identity","5":"ssh key"}[(.type|tostring)] // (.type|tostring)) as $t
+                | "\n    item: \(.name // "?")  [\($t)]",
+                  (if (.notes // "") != "" then "    notes: \(.notes|length) chars (hidden)" else empty end),
+                  (. as $o | ["login","secureNote","card","identity","sshKey","fields"][] as $k
+                   | select(($o[$k] // null) != null and ($o[$k] | length) > 0)
+                   | "    \($k): \(if ($o[$k]|type) == "object" then ($o[$k]|keys|join(", ")) else "\($o[$k]|length) entries" end) (values hidden)")'
+        else
+            printf ' (content not shown)'
+        fi
+    } >> "$D/cmd"
+fi
+printf '%s' "${BW_REASON:-}" | head -c 600 | head -n 8 > "$D/reason"
+
+# Open the fifo read-write first so the popup's write never blocks; display-popup
+# -E returns only when the popup closes (answer or Esc).
+exec 3<>"$D/pass"
+tmux display-popup -c "$client" -T ' bitwarden ' -w 80% -h 60% -E "'$SELF' --prompt '$D'" 2>/dev/null
+pass=
+IFS= read -r -t 1 -u 3 pass
+exec 3<&-
+[ -n "$pass" ] || { echo "bw-tmux: cancelled" >&2; exit 130; }
+
+SESSION=$(BW_TMUX_MASTER=$pass "$BW" unlock --raw --passwordenv BW_TMUX_MASTER </dev/null 2>/dev/null)
+pass=
+[ -n "$SESSION" ] || { echo "bw-tmux: unlock failed (wrong master password?)" >&2; exit 1; }
+
+if [ -n "$HAS_STDIN" ]; then
+    BW_SESSION=$SESSION "$BW" "$@" < "$D/stdin"
+else
+    BW_SESSION=$SESSION "$BW" "$@"
+fi
+exit $?   # cleanup (EXIT trap) locks the vault
