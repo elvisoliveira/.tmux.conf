@@ -14,10 +14,10 @@ P="$(dirname "$0")/tmux-notify-popup"
 
 fire() { printf '%s\n' "$1" | "$P"; }
 
-echo "Disparando 3 toasts no servidor tmux atual (${TMUX:-fora do tmux})..."
-fire '{"source":"CI","summary":"Build quebrou","body":"3 testes falharam no modulo auth","hints":{"urgency":"0x02"}}'
+echo "Firing 3 toasts at the current tmux server (${TMUX:-outside tmux})..."
+fire '{"source":"CI","summary":"Build broken","body":"3 tests failed in the auth module","hints":{"urgency":"0x02"}}'
 sleep 5
-fire '{"source":"claude","summary":"Tarefa finalizada","body":"pronto pra revisao","hints":{"urgency":"0x01"}}'
+fire '{"source":"claude","summary":"Task finished","body":"ready for review","hints":{"urgency":"0x01"}}'
 sleep 5
-fire '{"source":"backup","summary":"Snapshot concluido"}'
-echo "feito."
+fire '{"source":"backup","summary":"Snapshot done"}'
+echo "done."
