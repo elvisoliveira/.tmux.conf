@@ -2,7 +2,7 @@
 My tmux setup.
 
 ```
-ln -s (pwd)/.tmux.conf ~/.tmux.conf
+mkdir -p ~/.config/tmux && ln -s (pwd)/.tmux.conf ~/.config/tmux/tmux.conf   # tmux >= 3.1
 ```
 
 Plugins are managed by [tpack](https://github.com/nicholas-fedor/tpack), a
@@ -18,7 +18,7 @@ own README.
 - `bin/` — generic helpers: status-bar segments (`status-seg`, `battery`,
   `keyboard-layout`, `temperature`) and `tmux-swap-pane`.
 - [`bin/notify/`](bin/notify/README.md) — notify-send → tmux toast bridge.
-- [`bin/git/`](bin/git/README.md) — read-only git dashboard in a floating pane
+- [`bin/float/`](bin/float/README.md) — git dashboard and nvim in a floating pane
   (`Ctrl+G`).
 - [`bin/askpass/`](bin/askpass/README.md) — `SUDO_ASKPASS` helpers for sudo without a
   tty (tmux popup, or a resident agent in a terminal).

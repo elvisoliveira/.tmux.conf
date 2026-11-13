@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# tmux-float — a program in a floating pane over the active pane's directory.
+#
+#   tmux-float git        C-g: the read-only git dashboard gitsmart
+#                         (github.com/elvisoliveira/gitsmart), at the repo root
+#   tmux-float edit       C-e: nvim
+#
+#   Both run from the binding, under run-shell (no TTY): compute the geometry,
+#   auto-lock the outer tmux, create the float.
+#   tmux-float --run CMD  inside the float: runs CMD, and on any exit —
+#                         including SIGHUP when the float is closed from outside —
+#                         lifts the outer auto-lock
+#   tmux-float --zoom     C-z (bound in .tmux.conf): toggles the focused float
+#                         between 85% of the window and fullscreen
+#
+# Injected by the keybinding: TMUX_FLOAT_DIR = the active pane's directory.
+# ponytail: stays bash, not fish: the in-float unlock relies on trap EXIT/HUP
+# around a foreground child, which fish only runs once it regains control.
+set -euo pipefail
+
+if [ "${1:-}" = --run ]; then
+  shift
+  set +e
+  # Undo the outer auto-lock, but only if the float turned it on (a manual lock
+  # that predated the float keeps its state). The flag holds the locked session's
+  # name; -u reverts each option to its global default. Mirrors the C-Space unlock.
+  unlock() {
+    [ -n "${TMUX_OUTER:-}" ] || return 0
+    osock="${TMUX_OUTER%%,*}"
+    lsess=$(tmux -S "$osock" show -gv @float-autolock 2>/dev/null)
+    [ -n "$lsess" ] || return 0
+    tmux -S "$osock" set -t "$lsess" -u prefix \; set -t "$lsess" -u key-table \; \
+      set -t "$lsess" -u status-style \; set -gu @float-autolock \; refresh-client -S
+  }
+  trap unlock EXIT HUP TERM INT
+  "$@"
+  exit
+fi
+
+# Float size: 85% of the window, centered.
+geometry() {
+  read -r ww wh < <(tmux display -p '#{window_width} #{window_height}')
+  w=$(( ww * 85 / 100 ))
+  h=$(( wh * 85 / 100 ))
+  x=$(( (ww - w) / 2 ))
+  y=$(( (wh - h) / 2 ))
+}
+
+if [ "${1:-}" = --zoom ]; then
+  if [ "$(tmux show -pv @float-big 2>/dev/null)" = 1 ]; then
+    geometry
+    tmux resize-pane -x "$w" -y "$h" \; set -pu @float-big
+  else
+    tmux resize-pane -x 100% -y 100% \; set -p @float-big 1
+  fi
+  tmux move-pane -P center
+  exit
+fi
+
+SELF="$(readlink -f "$0")"
+
+cd "${TMUX_FLOAT_DIR:-$PWD}" 2>/dev/null || true
+
+case "${1:-}" in
+  git)
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      tmux display-message "tmux-float: not a git repository"
+      exit 0
+    fi
+    if [ ! -x "$HOME/.local/bin/gitsmart" ]; then
+      tmux display-message "gitsmart not installed — see ~/.env/.tmux.conf/bin/float/README.md"
+      exit 0
+    fi
+    dir=$(git rev-parse --show-toplevel)
+    title=' git '
+    env=(-e GIT_ROOT="$dir")
+    cmd=("$HOME/.local/bin/gitsmart")
+    ;;
+  edit)
+    dir=$PWD
+    title=' nvim '
+    env=()
+    cmd=(nvim -c NvimTreeOpen)
+    ;;
+  *)
+    tmux display-message "tmux-float: unknown mode '${1:-}'"
+    exit 1
+    ;;
+esac
+
+# Geometry: float centered at 85% of the window. In new-pane, -x/-y are the SIZE
+# and -X/-Y the POSITION (the opposite of display-popup).
+geometry
+win=$(tmux display -p '#{session_name}:#{window_index}')
+
+# Auto-lock the OUTER tmux while the float is open, mirroring its C-Space lock:
+# prefix -> None and key-table off, so C-b / C-w / C-g / C-e reach the program.
+# Target the session explicitly (-t) and stash its name in a global flag so
+# --run can unlock exactly this session — and only if WE
+# locked it (a pre-existing manual lock is left as it was).
+if [ "$(tmux show -gv key-table 2>/dev/null)" != off ]; then
+  sess=$(tmux display -p '#{session_name}')
+  tmux set -g @float-autolock "$sess" \; \
+      set -t "$sess" prefix None \; \
+      set -t "$sess" key-table off \; \
+      set -t "$sess" status-style 'bg=colour52,fg=colour255' \; \
+      refresh-client -S
+fi
+
+# TMUX_OUTER lets --run lift the lock. It's the outer's socket,pid,session triple.
+tmux new-pane -t "$win" -c "$dir" "${env[@]}" -e TMUX_OUTER="$TMUX" \
+  -B heavy -T "$title" \
+  -x "$w" -y "$h" -X "$x" -Y "$y" \
+  "$SELF" --run "${cmd[@]}"
