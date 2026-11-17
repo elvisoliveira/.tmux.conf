@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SUDO_ASKPASS: asks for the password in a tmux popup (display-popup), on
-# demand — no resident agent. Shows the real sudo command (read from /proc of
+# SUDO_ASKPASS: asks for the password in a tmux floating pane (new-pane; popup on
+# older tmux), on demand — no resident agent. Shows the real sudo command (read from /proc of
 # the parent process). The password goes to sudo over a 0600 FIFO in tmpfs.
 # Fallback: sudo-tty-agent (if running); otherwise fails with a warning.
 set -u
@@ -20,22 +20,42 @@ if [ -f "$RT/sudo-reason" ]; then
     rm -f "$RT/sudo-reason"
 fi
 
-# The most recently active tmux client gets the popup.
-client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null \
-         | sort -rn | awk 'NR==1{print $2}')
+# Target the client showing the caller's session (sudo run from a tmux pane
+# keeps $TMUX_PANE); without one, the most recently active client.
+sess=
+[ -n "${TMUX_PANE:-}" ] && sess=$(tmux display -p -t "$TMUX_PANE" '#{session_id}' 2>/dev/null)
+clients=$(tmux list-clients -F '#{client_activity} #{session_id} #{client_name}' 2>/dev/null | sort -rn)
+client=$(printf '%s\n' "$clients" | awk -v s="$sess" '$2==s{print $3; exit}')
+[ -n "$client" ] || client=$(printf '%s\n' "$clients" | awk 'NR==1{print $3}')
 if [ -n "$client" ]; then
     D=$(mktemp -d "$RT/sudo-ask.XXXXXX") || exit 1
     trap 'rm -rf "$D"' EXIT
     mkfifo -m600 "$D/pass" || exit 1
     printf '%s' "${CMD:-unknown command}" > "$D/cmd"
     printf '%s' "$REASON" > "$D/reason"
-    # Open the fifo read-write first so the prompt's write never blocks, then
-    # run the popup in the foreground: display-popup -E returns only when the
-    # popup closes (answer or Esc), so no polling is needed.
+    # Open the fifo read-write first so the prompt's write never blocks.
     exec 3<>"$D/pass"
-    tmux display-popup -c "$client" -T ' sudo ' -w 80% -h 60% -E "'$BIN/askpass-prompt' '$D'" 2>/dev/null
     pass=
-    IFS= read -r -t 1 -u 3 pass
+    if tmux list-commands new-pane >/dev/null 2>&1; then
+        # Floating pane (tmux >= 3.7), like bin/float: display-popup is not drawn
+        # over a zoomed window on tmux next-3.8. new-pane returns at once, so wait
+        # for the answer or for the pane to disappear (Esc / closed). For
+        # new-pane, -x/-y are the SIZE and -X/-Y the POSITION.
+        read -r win ww wh < <(tmux display -p -c "$client" '#{session_name}:#{window_index} #{window_width} #{window_height}')
+        w=$((ww * 8 / 10)); h=$((wh * 6 / 10))
+        pane=$(tmux new-pane -P -F '#{pane_id}' -t "$win" -B heavy -T ' sudo ' \
+               -x "$w" -y "$h" -X $(((ww - w) / 2)) -Y $(((wh - h) / 2)) \
+               "'$BIN/askpass-prompt' '$D'" 2>/dev/null)
+        while [ -n "$pane" ]; do
+            IFS= read -r -t 1 -u 3 pass && break
+            tmux list-panes -a -F '#{pane_id}' | grep -qxF "$pane" && continue
+            IFS= read -r -t 0.2 -u 3 pass; break   # answer written right before exit
+        done
+    else
+        # display-popup -E returns only when the popup closes (answer or Esc).
+        tmux display-popup -c "$client" -T ' sudo ' -w 80% -h 60% -E "'$BIN/askpass-prompt' '$D'" 2>/dev/null
+        IFS= read -r -t 1 -u 3 pass
+    fi
     if [ -z "$pass" ]; then
         # Cancelled (Esc / popup closed). sudo would otherwise re-run the
         # askpass up to passwd_tries times; interrupt it so Esc really cancels.

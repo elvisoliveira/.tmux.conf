@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs INSIDE the tmux popup opened by askpass-tmux. $1 is the request dir
+# Runs INSIDE the tmux float (or popup) opened by askpass-tmux. $1 is the request dir
 # holding cmd (authoritative), reason (optional, already truncated) and the
 # pass fifo. Never contains the password itself; it only writes it to the fifo.
 # Reads key by key so Esc cancels at once: tmux only closes a popup on Esc when
